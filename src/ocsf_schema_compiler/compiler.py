@@ -1,12 +1,11 @@
 import json
 import logging
 import os
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from utils import json_type_from_value
+from utils import deep_merge, extension_category_uid, json_type_from_value
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +31,14 @@ class Extension:
     caption: Optional[str]
     description: Optional[str]
     version: str
+    categories: Optional[StrValueDict]
     classes: Optional[StrValueDict]
     objects: Optional[StrValueDict]
     dictionary: Optional[StrValueDict]
     profiles: Optional[StrValueDict]
+
+
+type StrExtensionDict = dict[str, Extension]
 
 
 class SchemaCompiler:
@@ -62,13 +65,13 @@ class SchemaCompiler:
         if self.include_browser_data:
             logger.info("Including extra information needed by the schema browser (the OCSF Server)")
 
-        self.version: Optional[str] = None
-        self.categories: Optional[StrValueDict] = None
-        self.raw_classes: Optional[StrValueDict] = None
-        self.raw_objects: Optional[StrValueDict] = None
-        self.raw_dictionary: Optional[StrValueDict] = None
-        self.raw_profiles: Optional[StrValueDict] = None
-        self.extensions: dict[str, Extension] = OrderedDict()
+        self.version: str = "0.0.0"  # cached to use as fallback for extension versions
+        self.categories: StrValueDict = {}
+        self.dictionary: StrValueDict = {}
+        self.classes: StrValueDict = {}
+        self.objects: StrValueDict = {}
+        self.profiles: StrValueDict = {}
+        self.extensions: StrExtensionDict = {}
 
     def compile(self) -> Schema:
         if self.schema_path.is_dir():
@@ -76,29 +79,59 @@ class SchemaCompiler:
         else:
             raise FileNotFoundError(f"Schema path does not exist: {self.schema_path}")
 
-        self.read_version()
-        self.categories = read_json_object_file(self.schema_path / "categories.json")
-        self.raw_dictionary = read_json_object_file(self.schema_path / "dictionary.json")
-        self.raw_classes = self.read_classes(self.schema_path)
-        self.raw_objects = self.read_objects(self.schema_path)
-        self.raw_profiles = self.read_profiles(self.schema_path)
-        self.read_all_extensions()
+        self._read_version()
+        self.categories = _read_json_object_file(self.schema_path / "categories.json")
+        self.dictionary: StrValueDict = _read_json_object_file(self.schema_path / "dictionary.json")
+        self.classes: StrValueDict = _read_structured_items(self.schema_path, "events")
+        self.objects: StrValueDict = _read_structured_items(self.schema_path, "objects")
+        self.profiles: StrValueDict = _read_structured_items(self.schema_path, "profiles")
+        self._read_all_extensions()
 
-        # TODO
+        self.preprocess_extensions()
+        self.merge_categories_from_extensions()
+        self.merge_dictionary_from_extensions()
+        self.tweak_dictionary_object_types()
+
+        # TODO: process includes in classes, deal with profiles
+        # TODO: process includes in objects, deal with profiles
+        # TODO: merge classes from extensions (before or after includes?)
+        # TODO: merge objects from extensions (before or after includes?)
+        # TODO: process classes:
+        #       - observables (detect collisions, build up information for schema browser)
+        #       - patches (patching extends)
+        #       - resolve (flatten) inheritance (normal extends)
+        #       - save informational complete class hierarchy (for schema browser)
+        #       - remove "hidden" intermediate classes
+        # TODO: process objects:
+        #       - observables (detect collisions, build up information for schema browser)
+        #       - patches (patching extends)
+        #       - resolve (flatten) inheritance (normal extends)
+        #       - save informational complete object hierarchy (for schema browser)
+        #       - remove "hidden" intermediate objects
+        # TODO: merge dictionary into classes and objects (in Elixir, Utils.update_dictionary/4)
+        # TODO: observables from dictionary (in Elixir, Cache..observables_from_dictionary/2)
+        # TODO: process profiles (in Elixir JsonReady.read_profiles / Cache.update_profiles)
+        # TODO: More objects processing
+        # TODO: Profiles.sanity_check
+        # TODO: More classes processing
+        # TODO: Extract and further process base_event
+        # TODO: Fix entities (fix up / track missing attribute "requirement" values)
+        # TODO: Profit!
+
         return Schema(
             version=self.version,
             categories=self.categories,
-            classes=self.raw_classes,  # TODO: change to compiled classes
-            objects=self.raw_objects,  # TODO: change to compiled objects
-            dictionary=self.raw_dictionary,  # TODO: change to compiled dictionary
-            profiles=self.raw_profiles,  # TODO: change to compiled profiles
+            classes=self.classes,  # TODO: change to compiled classes
+            objects=self.objects,  # TODO: change to compiled objects
+            dictionary=self.dictionary,  # TODO: change to compiled dictionary
+            profiles=self.profiles,  # TODO: change to compiled profiles (information about profiles)
             # TODO: add extension information
         )
 
-    def read_version(self) -> None:
+    def _read_version(self) -> None:
         version_path = self.schema_path / "version.json"
         try:
-            obj = read_json_object_file(version_path)
+            obj = _read_json_object_file(version_path)
             self.version = obj["version"]
         except FileNotFoundError as e:
             raise FileNotFoundError(
@@ -106,48 +139,41 @@ class SchemaCompiler:
         except KeyError as e:
             raise KeyError(f'The "version" key is missing in the schema version file: {version_path}') from e
 
-    @staticmethod
-    def read_classes(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "events")
-
-    @staticmethod
-    def read_objects(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "objects")
-
-    @staticmethod
-    def read_profiles(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "profiles")
-
-    def read_all_extensions(self) -> None:
+    def _read_all_extensions(self) -> None:
         if not self.ignore_platform_extensions:
-            self.read_extensions(self.schema_path / "extensions", True)
+            self._read_extensions(self.schema_path / "extensions", True)
         if self.extensions_paths:
             for extensions_path in self.extensions_paths:
-                self.read_extensions(extensions_path, False)
+                self._read_extensions(extensions_path, False)
 
-    def read_extensions(self, base_path: Path, is_platform_extension: bool) -> None:
+    def _read_extensions(self, base_path: Path, is_platform_extension: bool) -> None:
         for dir_path, dir_names, file_names in os.walk(base_path, topdown=False):
             for file_name in file_names:
                 if file_name == "extension.json":
                     # we found an extension at dir_path
-                    extension = self.read_extension(Path(dir_path), is_platform_extension)
+                    extension = self._read_extension(Path(dir_path), is_platform_extension)
                     self.extensions[extension.name] = extension
                     logger.info("Added extension %s from directory %s", extension.name, dir_path)
 
-    def read_extension(self, base_path: Path, is_platform_extension: bool) -> Extension:
+    def _read_extension(self, base_path: Path, is_platform_extension: bool) -> Extension:
         logger.info("Reading extension directory: %s", base_path)
         # This should only be called after we know that extension.json exists in base_path,
         # so there's no need for extra error handling.
         extension_info_path = base_path / "extension.json"
-        info = read_json_object_file(extension_info_path)
-        raw_classes = self.read_extension_classes(base_path)
-        raw_objects = self.read_extension_objects(base_path)
+        info = _read_json_object_file(extension_info_path)
+        categories_path = base_path / "categories.json"
+        if categories_path.is_file():
+            categories = _read_json_object_file(categories_path)
+        else:
+            categories = {}
+        classes = _read_structured_items(base_path, "events", is_extension=True)
+        objects = _read_structured_items(base_path, "objects", is_extension=True)
         dictionary_path = base_path / "dictionary.json"
         if dictionary_path.is_file():
-            raw_dictionary = read_json_object_file(base_path / "dictionary.json")
+            dictionary = _read_json_object_file(base_path / "dictionary.json")
         else:
-            raw_dictionary = {}
-        raw_profiles = self.read_extension_profiles(base_path)
+            dictionary = {}
+        profiles = _read_structured_items(base_path, "profiles", is_extension=True)
 
         try:
             if is_platform_extension and "version" not in info:
@@ -162,65 +188,103 @@ class SchemaCompiler:
                 caption=info.get("caption"),
                 description=info.get("description"),
                 version=version,
-                classes=raw_classes,
-                objects=raw_objects,
-                dictionary=raw_dictionary,
-                profiles=raw_profiles,
+                categories=categories,
+                classes=classes,
+                objects=objects,
+                dictionary=dictionary,
+                profiles=profiles,
             )
         except KeyError as e:
             raise KeyError(f"Extension has malformed extension.json file - missing {e}: {extension_info_path}") from e
 
-    @staticmethod
-    def read_extension_classes(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "events", is_extension=True)
+    def preprocess_extensions(self) -> None:
+        for extension_name, extension in self.extensions.items():
+            if "attributes" in extension.categories:
+                try:
+                    for attribute_name, attribute in extension.categories["attributes"].items():
+                        attribute["uid"] = extension_category_uid(extension.uid, attribute["uid"])
+                        attribute["extension"] = extension_name
+                        attribute["extension_id"] = extension.uid
+                except KeyError as e:
+                    raise KeyError(f"Malformed category in extension {extension.name} - missing {e}") from e
 
-    @staticmethod
-    def read_extension_objects(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "objects", is_extension=True)
+    def merge_categories_from_extensions(self) -> None:
+        if "attributes" not in self.categories:
+            self.categories["attributes"] = {}
+        attributes = self.categories["attributes"]
+        for extension_name, extension in self.extensions.items():
+            if "attributes" in extension.categories:
+                deep_merge(attributes, extension.categories["attributes"])
 
-    @staticmethod
-    def read_extension_profiles(base_path: Path) -> StrValueDict:
-        return SchemaCompiler.read_items(base_path, "profiles", is_extension=True)
+    def merge_dictionary_from_extensions(self) -> None:
+        if "attributes" not in self.dictionary:
+            self.dictionary["attributes"] = {}
+        attributes = self.dictionary["attributes"]
 
-    @staticmethod
-    def read_items(base_path: Path, kind: str, is_extension=False) -> StrValueDict:
-        """
-        Read schema type items found in kind directory under base_path, recursively, and returns dict with
-        unprocessed items, each keyed by their name attribute or for extension patches, keyed by the name of the
-        item being patched.
-        """
-        # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
-        item_path = base_path / kind
-        items = OrderedDict()
-        for dir_path, dir_names, file_names in os.walk(item_path, topdown=False):
-            for file_name in file_names:
-                if file_name.endswith(".json"):
-                    file_path = Path(dir_path, file_name)
-                    obj = read_json_object_file(file_path)
-                    if is_extension:
-                        if "name" in obj:
-                            items[obj["name"]] = obj
-                        elif "extends" in obj:
-                            obj["_is_patch"] = True
-                            items[obj["extends"]] = obj
-                        else:
-                            raise KeyError(
-                                f'Extension {kind} file does not have a "name" or "extends" attribute: {file_path}')
-                    else:
-                        try:
-                            items[obj["name"]] = obj
-                        except KeyError as e:
-                            raise KeyError(f'The "name" key is missing in {kind} file: {file_path}') from e
-        return items
+        if "types" not in self.dictionary:
+            self.dictionary["types"] = {}
+        types = self.dictionary["types"]
+        if "attributes" not in types:
+            types["attributes"] = {}
+        types_attributes = types["attributes"]
+
+        for extension_name, extension in self.extensions.items():
+            if extension.dictionary:
+                if "attributes" in extension.dictionary:
+                    deep_merge(attributes, extension.dictionary["attributes"])
+                if "types" in extension.dictionary and "attributes" in extension.dictionary["types"]:
+                    deep_merge(types_attributes, extension.dictionary["types"]["attributes"])
+
+    def tweak_dictionary_object_types(self) -> None:
+        """Converts dictionary types not defined in dictionary's types to object types."""
+        types = self.dictionary["types"]["attributes"]
+        if types is None:
+            types = {}
+        for attribute_name, attribute in self.dictionary["attributes"].items():
+            attribute_type = attribute.get("type")
+            if attribute_type not in types:
+                attribute["type"] = "object_t"
+                attribute["object_type"] = attribute_type
 
 
-def read_json_object_file(path: Path) -> StrValueDict:
+def _read_json_object_file(path: Path) -> StrValueDict:
     with open(path) as f:
         v = json.load(f)
         if not isinstance(v, dict):
             t = json_type_from_value(v)
             raise TypeError(f"Schema file contains a JSON {t} value, but should contain an object: {path}")
         return v
+
+
+def _read_structured_items(base_path: Path, kind: str, is_extension=False) -> Optional[StrValueDict]:
+    """
+    Read schema structured items found in `kind` directory under `base_path`, recursively, and returns dict with
+    unprocessed items, each keyed by their name attribute or for extension patches, keyed by the name of the
+    item being patched.
+    """
+    # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
+    item_path = base_path / kind
+    items = {}
+    for dir_path, dir_names, file_names in os.walk(item_path, topdown=False):
+        for file_name in file_names:
+            if file_name.endswith(".json"):
+                file_path = Path(dir_path, file_name)
+                obj = _read_json_object_file(file_path)
+                if is_extension:
+                    if "name" in obj:
+                        items[obj["name"]] = obj
+                    elif "extends" in obj:
+                        obj["_is_patch"] = True
+                        items[obj["extends"]] = obj
+                    else:
+                        raise KeyError(
+                            f'Extension {kind} file does not have a "name" or "extends" attribute: {file_path}')
+                else:
+                    try:
+                        items[obj["name"]] = obj
+                    except KeyError as e:
+                        raise KeyError(f'The "name" key is missing in {kind} file: {file_path}') from e
+    return items
 
 
 def schema_compile(

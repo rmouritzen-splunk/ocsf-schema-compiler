@@ -1,7 +1,34 @@
 from typing import Any
 
+
+def deep_merge(dest: Any, source: Any) -> None:
+    """
+    Merge a source dictionary in-place into a destination dictionary.
+    This merge does not deep merge dictionaries inside lists.
+    """
+    if not isinstance(dest, dict):
+        return
+    if not isinstance(source, dict):
+        return
+    for source_key, source_value in source.items():
+        if source_key in dest:
+            dest_value = dest[source_key]
+            if isinstance(dest_value, dict) and isinstance(source_value, dict):
+                deep_merge(dest_value, source_value)
+            else:
+                dest[source_key] = source_value
+        else:
+            dest[source_key] = source_value
+
+
+def extension_category_uid(extension_uid: int, original_category_uid: int) -> int:
+    """Return an extension-specific category UID."""
+    assert original_category_uid < 100  # TODO: Remove (debugging)
+    return extension_uid * 100 + original_category_uid
+
+
 def json_type_from_value(value: Any) -> str:
-    """Return JSON type for a Python value. See https://json.org."""
+    """Return JSON type for a Python value. See https://json.org. This is intended for error messages."""
     if isinstance(value, dict):
         return "object"
     if isinstance(value, list):
