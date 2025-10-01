@@ -57,11 +57,10 @@ def main():
 
     schema = schema_compile(
         args.path, args.ignore_platform_extensions, args.extensions_paths, args.include_browser_data)
-    # TODO print(json.dumps(schema, cls=DataclassEncoder))
-    # print("Categories")
-    # print(json.dumps(schema.categories, indent=2, sort_keys=True))
-    print("Dictionary")
-    print(json.dumps(schema.dictionary, indent=2, sort_keys=True))
+    logger.info("Compile successful")
+    # TODO: final version: print(json.dumps(schema, cls=DataclassEncoder))
+    # TODO: debugging friendly version:
+    print(json.dumps(schema, cls=DataclassEncoder, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':

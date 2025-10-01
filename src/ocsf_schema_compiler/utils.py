@@ -3,22 +3,20 @@ from typing import Any
 
 def deep_merge(dest: Any, source: Any) -> None:
     """
-    Merge a source dictionary in-place into a destination dictionary.
-    This merge does not deep merge dictionaries inside lists.
+    In-place merge a source dictionary into a destination dictionary, modifying the destination dictionary.
+    Note: this merge does not deep merge dictionaries inside lists.
     """
-    if not isinstance(dest, dict):
-        return
-    if not isinstance(source, dict):
-        return
-    for source_key, source_value in source.items():
-        if source_key in dest:
-            dest_value = dest[source_key]
-            if isinstance(dest_value, dict) and isinstance(source_value, dict):
-                deep_merge(dest_value, source_value)
+    if isinstance(dest, dict) and isinstance(source, dict):
+        for source_key, source_value in source.items():
+            if source_key in dest:
+                dest_value = dest[source_key]
+                if isinstance(dest_value, dict) and isinstance(source_value, dict):
+                    deep_merge(dest_value, source_value)
+                else:
+                    # This replaces dest[source_key] with source_value
+                    dest[source_key] = source_value
             else:
                 dest[source_key] = source_value
-        else:
-            dest[source_key] = source_value
 
 
 def extension_category_uid(extension_uid: int, original_category_uid: int) -> int:
