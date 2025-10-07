@@ -589,7 +589,7 @@ class SchemaCompiler:
             cls_uid = category_scoped_class_uid(category_uid, cls.get("uid", 0))
             cls["uid"] = cls_uid
 
-            # add/update type uid attribute
+            # add/update type_uid attribute
             cls_attributes = cls.setdefault("attributes", {})
             cls_caption = cls.get("caption", "UNKNOWN")
             type_uid_attribute = cls_attributes.setdefault("type_uid", {})
@@ -604,16 +604,45 @@ class SchemaCompiler:
                     type_uid_enum[enum_key] = enum_value
             else:
                 raise SchemaException(f'Class "{cls_key}" has invalid "activity_id" definition: "enum" not defined')
-
             type_uid_enum[str(class_uid_scoped_type_uid(cls_uid, 0))] = {
                 "caption": f"{cls_caption}: Unknown",
             }
-
             type_uid_attribute["enum"] = type_uid_enum
+            # TODO: Only add when self.include_browser_data is True?
+            type_uid_attribute["_source"] = cls_key
 
-            # TODO: add class uid
-            # TODO: add category uid
-            pass
+            # add class_uid and class_name attributes
+            cls_uid_attribute = cls_attributes.setdefault("class_uid", {})
+            cls_name_attribute = cls_attributes.setdefault("class_name", {})
+            cls_uid_key = str(cls_uid)
+            enum = {cls_uid_key: {"caption": cls_caption, "description": cls.get("description", "")}}
+            cls_uid_attribute["enum"] = enum
+            # TODO: Only add when self.include_browser_data is True?
+            cls_uid_attribute["_source"] = cls_key
+            cls_name_attribute["description"] = (f"The event class name,"
+                                                 f" as defined by class_uid value: <code>{cls_caption}</code>.")
+
+            # add category_uid
+            # add/update category_uid and category_name attributes
+            if category:
+                category_uid = category.get("uid", 0)
+                cls["category_uid"] = category_uid
+
+                category_uid_attribute = cls_attributes.setdefault("category_uid", {})
+                enum = category_uid_attribute.setdefault("enum", {})
+                category_uid_key = str(category_uid)
+                enum[category_uid_key] = deepcopy(category)
+
+                category_name_attribute = cls_attributes.setdefault("category_name", {})
+                category_name_attribute["description"] = (f"The event category name, as defined by category_uid value:"
+                                                          f" <code>{category.get("caption", "")}</code>.)")
+            else:
+                if category_key == "other":
+                    logger.info('Class "%s" uses special undefined category "other"', cls_key)
+                elif category_key is None:
+                    logger.warning('Class "%s" has no category', cls_key)
+                else:
+                    logger.warning('Class "%s" has undefined category "%s"', cls_key, category_key)
 
     def _process_objects(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward

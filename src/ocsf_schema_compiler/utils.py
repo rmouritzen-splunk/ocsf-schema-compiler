@@ -48,17 +48,18 @@ def put_non_none(d: dict, k: Any, v: Any) -> None:
 def extension_scoped_category_uid(extension_uid: int, original_category_uid: int) -> int:
     """Return an extension-specific category UID."""
     assert original_category_uid < 100, \
-        f"category_uid {original_category_uid} should be less than 100 (not yet extension scoped)"
+        f"category_uid {original_category_uid} should be less than 100 (not yet extension UID scoped)"
     return extension_uid * 100 + original_category_uid
 
 
 def category_scoped_class_uid(category_uid: int, cls_uid: int) -> int:
     """Return a category-specific class UID."""
-    assert category_uid < 100, f"category_uid {category_uid} should be less than 100 (not extension scoped)"
-    assert cls_uid < 1000, f"class_uid {cls_uid} should be less than 1000 (not yet category scoped)"
+    assert category_uid < 100, f"category_uid {category_uid} should be less than 100 (not extension UID scoped)"
+    assert cls_uid < 1000, f"class UID {cls_uid} should be less than 1000 (not yet category UID scoped)"
     return category_uid * 1000 + cls_uid
 
 
 def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     """Return a class-specific type UID."""
+    assert type_uid < 1000, f"type_uid {type_uid} should be less than 1000 (not class UID scoped)"
     return cls_uid * 1000 + type_uid
