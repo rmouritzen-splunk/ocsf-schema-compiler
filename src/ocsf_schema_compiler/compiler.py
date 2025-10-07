@@ -143,6 +143,8 @@ class SchemaCompiler:
         #       NOTE: This doesn't seem necessary since in Python we are updating in-place.
         # TODO: Fix entities (fix up / track missing attribute "requirement" values)
         # TODO: Profit!
+
+        # TODO: Double-check compiled schema: diff against Elixir-generated schema
         # TODO: Handle include_browser_data, which could be stripping keys with leading underscores,
         #       as opposed to adding in browser information after fully compiling (which wouldn't work).
 
@@ -301,15 +303,15 @@ class SchemaCompiler:
                     profile_attribute["extension_id"] = extension.uid
 
     def _read_and_enrich_profiles(self) -> JObject:
-        return _read_structured_items(self.schema_path, "profiles", self._profile_callback)
+        return _read_structured_items(self.schema_path, "profiles", self._enrich_profile)
 
     def _read_and_enrich_extension_profiles(
         self, extension_id: int, extension_name: str, base_path: Path
     ) -> JObject:
-        item_callback = lambda path, item: self._extension_profile_callback(extension_id, extension_name, path, item)
+        item_callback = lambda path, item: self._enrich_extension_profile(extension_id, extension_name, path, item)
         return _read_structured_items(base_path, "profiles", item_callback)
 
-    def _profile_callback(self, path: Path, profile: JObject) -> None:
+    def _enrich_profile(self, path: Path, profile: JObject) -> None:
         attributes = profile.setdefault("attributes", {})
         profile_name = profile.get("name")
         if not isinstance(profile_name, str):
@@ -319,7 +321,7 @@ class SchemaCompiler:
             attribute["profile"] = profile_name
         self._include_cache[path] = profile
 
-    def _extension_profile_callback(
+    def _enrich_extension_profile(
         self, extension_id: int, extension_name: str, path: Path, profile: JObject
     ) -> None:
         attributes = profile.setdefault("attributes", {})
@@ -336,18 +338,18 @@ class SchemaCompiler:
     def _resolve_includes(self) -> None:
         path_resolver = lambda file_name: self.schema_path / file_name
         for cls in self._classes.values():
-            self._resolve_item_includes(cls, f"class {cls.get("name")}", path_resolver)
+            self._resolve_item_includes(cls, f'class "{cls.get("name")}"', path_resolver)
         for obj in self._objects.values():
-            self._resolve_item_includes(obj, f"object {obj.get("name")}", path_resolver)
+            self._resolve_item_includes(obj, f'object "{obj.get("name")}"', path_resolver)
 
     def _resolve_extension_includes(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             path_resolver = lambda file_name: self._resolve_extension_include_path(extension, file_name)
             for cls in extension.classes.values():
-                context = f"extension {extension.name} class {cls.get("name")}"
+                context = f'extension "{extension.name}" class "{cls.get("name")}"'
                 self._resolve_item_includes(cls, context, path_resolver)
             for obj in extension.objects.values():
-                context = f"extension {extension.name} object {obj.get("name")}"
+                context = f'extension "{extension.name}" object "{obj.get("name")}"'
                 self._resolve_item_includes(obj, context, path_resolver)
 
     def _resolve_extension_include_path(self, extension: Extension, file_name: str) -> Path:
@@ -357,7 +359,7 @@ class SchemaCompiler:
         path = self.schema_path / file_name
         if path.is_file():
             return path
-        raise FileNotFoundError(f'Extension {extension.name} "$include" {file_name} not found in'
+        raise FileNotFoundError(f'Extension "{extension.name}" "$include" {file_name} not found in'
                                 f' extension directory {extension.base_path} or schema directory {self.schema_path}')
 
     def _resolve_item_includes(
@@ -431,6 +433,9 @@ class SchemaCompiler:
         #       ... other attributes
         #    }
         # }
+
+        # attributes may have been modified, so we need to get them again, though now we know they exist
+        item_attributes = item["attributes"]
         for attribute_key, attribute in item_attributes.items():
             if isinstance(attribute, dict) and "$include" in attribute:
                 sub_context = f"{context} attributes.{attribute_key}.$include"
@@ -566,7 +571,7 @@ class SchemaCompiler:
             for k in ["name", "caption", "extends", "extension"]:
                 if k in cls:
                     cls_slice[k] = cls[k]
-                cls_slice["is_hidden"] = _is_hidden_class(cls_key, cls)
+            cls_slice["is_hidden"] = _is_hidden_class(cls_key, cls)
             self._all_classes[cls_key] = cls_slice
 
         # Remove hidden classes
@@ -902,8 +907,9 @@ class SchemaCompiler:
 
         parent_key = item.get("extends")
         SchemaCompiler._resolve_item_extends(items, parent_key, items.get(parent_key), kind)
-
-        parent_key = item.get("extends")  # re-get extends in case it was changed
+        assert parent_key == item.get("extends"), (f'{kind} "{item_key}" "extends" value should not change after'
+                                                   f' recursively processing parent: original value: "{parent_key}",'
+                                                   f' current value: "{item.get("extends")}"')
 
         if parent_key:
             parent_item = items.get(parent_key)
