@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from utils import deep_merge, extension_category_uid, json_type_from_value
+from utils import (
+    deep_merge, json_type_from_value, put_non_none,
+    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,8 @@ class SchemaException(Exception):
 
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
+# As with all Python type hints, these improve code readability and help IDEs identify type mismatches.
+
 # JValue is type alias for types compatible with JSON values.
 type JValue = JObject | JArray | str | int | float | bool | None
 # JObject is a type alias for dictionary compatible with a JSON object.
@@ -60,11 +65,11 @@ type PatchDict = dict[str, list[JObject]]
 
 class SchemaCompiler:
     def __init__(
-            self,
-            schema_path: Path,
-            ignore_platform_extensions: bool,
-            extensions_paths: Optional[list[Path]],
-            include_browser_data: bool
+        self,
+        schema_path: Path,
+        ignore_platform_extensions: bool,
+        extensions_paths: Optional[list[Path]],
+        include_browser_data: bool
     ) -> None:
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
@@ -86,12 +91,20 @@ class SchemaCompiler:
         self._categories: JObject = {}
         self._dictionary: JObject = {}
         self._classes: JObject = {}
+        # class patches consolidated from all extensions
         self._class_patches: PatchDict = {}
         self._objects: JObject = {}
+        # object patches consolidated from all extensions
         self._object_patches: PatchDict = {}
         self._profiles: JObject = {}
         self._include_cache: dict[Path, JObject] = {}
+        # Observable type_id values extracted from all observable sources
+        # Used to detect collisions and populate the observable object's type_id enum
         self._observable_type_id_dict: JObject = {}
+        # Slice of classes before removing "hidden" / abstract classes
+        self._all_classes: JObject = {}
+        # Slice of objects before removing "hidden" / abstract objects
+        self._all_objects: JObject = {}
 
     def compile(self) -> Schema:
         if self.schema_path.is_dir():
@@ -130,7 +143,7 @@ class SchemaCompiler:
         #       NOTE: This doesn't seem necessary since in Python we are updating in-place.
         # TODO: Fix entities (fix up / track missing attribute "requirement" values)
         # TODO: Profit!
-        #       Handle include_browser_data, which could be stripping keys with leading underscores,
+        # TODO: Handle include_browser_data, which could be stripping keys with leading underscores,
         #       as opposed to adding in browser information after fully compiling (which wouldn't work).
 
         return Schema(
@@ -174,7 +187,7 @@ class SchemaCompiler:
         return extensions
 
     def _read_extensions(
-            self, extensions: list[Extension], base_path: Path, is_platform_extension: bool
+        self, extensions: list[Extension], base_path: Path, is_platform_extension: bool
     ) -> None:
         for dir_path, dir_names, file_names in os.walk(base_path, topdown=False):
             for file_name in file_names:
@@ -254,7 +267,7 @@ class SchemaCompiler:
         for extension in extensions:
             try:
                 for category_detail in extension.categories.setdefault("attributes", {}).values():
-                    category_detail["uid"] = extension_category_uid(extension.uid, category_detail["uid"])
+                    category_detail["uid"] = extension_scoped_category_uid(extension.uid, category_detail["uid"])
                     category_detail["extension"] = extension.name
                     category_detail["extension_id"] = extension.uid
             except KeyError as e:
@@ -291,7 +304,7 @@ class SchemaCompiler:
         return _read_structured_items(self.schema_path, "profiles", self._profile_callback)
 
     def _read_and_enrich_extension_profiles(
-            self, extension_id: int, extension_name: str, base_path: Path
+        self, extension_id: int, extension_name: str, base_path: Path
     ) -> JObject:
         item_callback = lambda path, item: self._extension_profile_callback(extension_id, extension_name, path, item)
         return _read_structured_items(base_path, "profiles", item_callback)
@@ -302,22 +315,22 @@ class SchemaCompiler:
         if not isinstance(profile_name, str):
             raise SchemaException(f'Profile "name" value must be a string,'
                                   f' but got {json_type_from_value(profile_name)}')
-        for attribute_detail in attributes.values():
-            attribute_detail["profile"] = profile_name
+        for attribute in attributes.values():
+            attribute["profile"] = profile_name
         self._include_cache[path] = profile
 
     def _extension_profile_callback(
-            self, extension_id: int, extension_name: str, path: Path, profile: JObject
+        self, extension_id: int, extension_name: str, path: Path, profile: JObject
     ) -> None:
         attributes = profile.setdefault("attributes", {})
         profile_name = profile.get("name")
         if not isinstance(extension_name, str):
             raise SchemaException(f'Extension "{extension_name}" profile "name" value must be a string,'
                                   f' but got {json_type_from_value(profile_name)}')
-        for attribute_detail in attributes.values():
-            attribute_detail["profile"] = profile_name
-            attribute_detail["extension_id"] = extension_id
-            attribute_detail["extension"] = extension_name
+        for attribute in attributes.values():
+            attribute["profile"] = profile_name
+            attribute["extension_id"] = extension_id
+            attribute["extension"] = extension_name
         self._include_cache[path] = profile
 
     def _resolve_includes(self) -> None:
@@ -344,14 +357,14 @@ class SchemaCompiler:
         path = self.schema_path / file_name
         if path.is_file():
             return path
-        raise FileNotFoundError(f"Extension {extension.name} $include {file_name} not found in"
-                                f" extension directory {extension.base_path} or schema directory {self.schema_path}")
+        raise FileNotFoundError(f'Extension {extension.name} "$include" {file_name} not found in'
+                                f' extension directory {extension.base_path} or schema directory {self.schema_path}')
 
     def _resolve_item_includes(
-            self,
-            item: Optional[JObject],
-            context: str,
-            path_resolver: Callable[[str], Path]
+        self,
+        item: Optional[JObject],
+        context: str,
+        path_resolver: Callable[[str], Path]
     ) -> None:
         item_attributes = item.setdefault("attributes", {})
 
@@ -393,10 +406,10 @@ class SchemaCompiler:
                     include_path = path_resolver(include_file_name)
                     self._merge_attributes_include(item, sub_context, include_path)
             else:
-                t = json_type_from_value(include_value)
-                raise TypeError(f"Illegal {sub_context} value type: expected string or array (list), but got {t}")
+                raise TypeError(f"Illegal {sub_context} value type:"
+                                f" expected string or array (list), but got {json_type_from_value(include_value)}")
 
-        # Second resolve $include at in attribute details. An include at this level is a JSON object containing
+        # Second resolve $include in attribute details. An include at this level is a JSON object containing
         # exactly the information to merge in. These are (or were) used to extract common enum values.
         # The merge prefers existing values. The existing attributes details (if any) are merged on top of
         #
@@ -418,18 +431,18 @@ class SchemaCompiler:
         #       ... other attributes
         #    }
         # }
-        for attribute_name, attribute_detail in item_attributes.items():
-            if isinstance(attribute_detail, dict) and "$include" in attribute_detail:
-                sub_context = f"{context} attributes.{attribute_name}.$include"
+        for attribute_key, attribute in item_attributes.items():
+            if isinstance(attribute, dict) and "$include" in attribute:
+                sub_context = f"{context} attributes.{attribute_key}.$include"
                 # Get $include value and remove it from attribute
-                include_value = attribute_detail.pop("$include")
+                include_value = attribute.pop("$include")
                 if isinstance(include_value, str):
                     include_path = path_resolver(include_value)
                     self._merge_attribute_detail_include(
-                        item_attributes, attribute_name, attribute_detail, sub_context, include_path)
+                        item_attributes, attribute_key, attribute, sub_context, include_path)
                 else:
-                    t = json_type_from_value(include_value)
-                    raise TypeError(f"Illegal {sub_context} value type: expected string, but got {t}")
+                    raise TypeError(f"Illegal {sub_context} value type: expected string,"
+                                    f" but got {json_type_from_value(include_value)}")
 
     def _merge_attributes_include(self, item: JObject, context: str, include_path: Path) -> None:
         include_item = self._get_include_contents(context, include_path)
@@ -449,22 +462,22 @@ class SchemaCompiler:
         item["attributes"] = attributes
 
     def _merge_attribute_detail_include(
-            self,
-            attributes: JObject,
-            attribute_name: str,
-            attribute_detail: JObject,
-            context: str,
-            include_path: Path) -> None:
+        self,
+        attributes: JObject,
+        attribute_key: str,
+        attribute: JObject,
+        context: str,
+        include_path: Path) -> None:
         include_item = self._get_include_contents(context, include_path)
 
         # Create new attribute_detail for attributes.{attribute_name}, starting with included_item
         # Include files should always have "attributes", but we will be defensive.
-        new_attribute_detail = deepcopy(include_item)
+        new_attribute = deepcopy(include_item)
 
         # Merge original attribute detail on top of the copy of the included attribute_detail, preferring the original
-        deep_merge(new_attribute_detail, attribute_detail)
+        deep_merge(new_attribute, attribute)
         # replace existing attribute detail with the new merged detail
-        attributes[attribute_name] = new_attribute_detail
+        attributes[attribute_key] = new_attribute
 
     def _get_include_contents(self, context: str, include_path: Path) -> JObject:
         if include_path in self._include_cache:
@@ -477,39 +490,28 @@ class SchemaCompiler:
         except FileNotFoundError as e:
             raise SchemaException(f"{context} file does not exist: {include_path}") from e
 
-    def _merge_classes_from_extensions(self, extensions: list[Extension]):
+    def _merge_classes_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             if extension.classes:
-                for class_name, class_detail in extension.classes.items():
-                    if class_name in self._classes:
-                        # logger.warning('"%s" extension class "%s" is overwriting existing class',
-                        #                extension.name, class_name)
-                        if "extension" in class_detail:
-                            raise SchemaException(f'Collision: "{extension.name}" class "{class_name}"'
-                                                  f' collides with extension {class_detail["extension"]} class'
-                                                  f' with caption {class_detail.get("caption"), ""}')
-                        else:
-                            raise SchemaException(f'Collision: "{extension.name}" class "{class_name}"'
-                                                  f' collides with base class'
-                                                  f' with caption {class_detail.get("caption"), ""}')
-                    self._classes[class_name] = class_detail
+                self._merge_extension_items(extension.name, extension.classes, self._classes, "class")
 
-    def _merge_objects_from_extensions(self, extensions: list[Extension]):
+    def _merge_objects_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             if extension.objects:
-                for object_name, object_detail in extension.objects.items():
-                    if object_name in self._objects:
-                        # logger.warning('"%s" extension object "%s" is overwriting existing object',
-                        #                extension.name, object_name)
-                        if "extension" in object_detail:
-                            raise SchemaException(f'Collision: "{extension.name}" object "{object_name}"'
-                                                  f' collides with extension {object_detail["extension"]} object'
-                                                  f' with caption {object_detail.get("caption"), ""}')
-                        else:
-                            raise SchemaException(f'Collision: "{extension.name}" object "{object_name}"'
-                                                  f' collides with base object'
-                                                  f' with caption {object_detail.get("caption"), ""}')
-                    self._objects[object_name] = object_detail
+                self._merge_extension_items(extension.name, extension.objects, self._objects, "object")
+
+    @staticmethod
+    def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str) -> None:
+        for ext_item_key, ext_item in extension_items.items():
+            if ext_item_key in items:
+                item_caption = ext_item.get("caption", "")
+                if "extension" in ext_item:
+                    raise SchemaException(f'Collision: "{extension_name}" {kind} "{ext_item_key}" collides with'
+                                          f' extension "{ext_item["extension"]}" {kind} with caption "{item_caption}"')
+                else:
+                    raise SchemaException(f'Collision: "{extension_name}" {kind} "{ext_item_key}" collides with'
+                                          f' base schema {kind} with caption "{item_caption}"')
+            items[ext_item_key] = ext_item
 
     def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
         categories_attributes = self._categories.setdefault("attributes", {})
@@ -532,182 +534,253 @@ class SchemaCompiler:
 
     def _consolidate_extension_patches(self, extensions: list[Extension]) -> None:
         for extension in extensions:
-            for patch_name, patch_detail in extension.class_patches.items():
-                patches = self._class_patches.setdefault(patch_name, [])
-                patches.append(patch_detail)
-            for patch_name, patch_detail in extension.object_patches.items():
-                patches = self._object_patches.setdefault(patch_name, [])
-                patches.append(patch_detail)
+            for patch_key, patch in extension.class_patches.items():
+                patches = self._class_patches.setdefault(patch_key, [])
+                patches.append(patch)
+            for patch_key, patch in extension.object_patches.items():
+                patches = self._object_patches.setdefault(patch_key, [])
+                patches.append(patch)
 
     def _enrich_dictionary_object_types(self) -> None:
         """Converts dictionary types not defined in dictionary's types to object types."""
         types = self._dictionary.setdefault("types", {})
         types_attributes = types.setdefault("attributes", {})
-        for attribute_name, attribute in self._dictionary.setdefault("attributes", {}).items():
+        for attribute_key, attribute in self._dictionary.setdefault("attributes", {}).items():
             attribute_type = attribute.get("type")
             if attribute_type not in types_attributes:
                 attribute["type"] = "object_t"
                 attribute["object_type"] = attribute_type
 
     def _process_classes(self) -> None:
+        # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
+        # the observable type_id will be propagated to all children of an event class.
         self._observables_from_classes()
-        # TODO: process classes:
-        #       - patches (patching extends)
-        #       - resolve (flatten) inheritance (normal extends)
-        #       - save informational complete class hierarchy (for schema browser)
-        #       - enrich classes with scoped UIDs (Cache.enrich_class)
-        #       - remove "hidden" intermediate classes
-        for class_name, class_detail in self._classes.items():
+
+        self._resolve_patches(self._classes, self._class_patches, "class")
+        self._resolve_extends(self._classes, "class")
+
+        # Save informational complete class hierarchy (for schema browser)
+        # TODO: only do this when self.include_browser_data is True?
+        for cls_key, cls in self._classes.items():
+            cls_slice = {}
+            for k in ["name", "caption", "extends", "extension"]:
+                if k in cls:
+                    cls_slice[k] = cls[k]
+                cls_slice["is_hidden"] = _is_hidden_class(cls_key, cls)
+            self._all_classes[cls_key] = cls_slice
+
+        # Remove hidden classes
+        self._classes = {name: cls for name, cls in self._classes.items() if not _is_hidden_class(name, cls)}
+
+        self._enrich_classes()
+
+    def _enrich_classes(self) -> None:
+        # enrich classes
+        for cls_key, cls in self._classes.items():
+            # update class uid
+            category_key = cls.get("category")
+            category = self._categories.setdefault("attributes", {}).get(category_key)
+            if category:
+                cls["category_name"] = category.get("caption")
+                category_uid = category.get("uid", 0)
+            else:
+                category_uid = 0
+
+            cls_uid = category_scoped_class_uid(category_uid, cls.get("uid", 0))
+            cls["uid"] = cls_uid
+
+            # add/update type uid attribute
+            cls_attributes = cls.setdefault("attributes", {})
+            cls_caption = cls.get("caption", "UNKNOWN")
+            type_uid_attribute = cls_attributes.setdefault("type_uid", {})
+            type_uid_enum = {}
+            if "activity_id" in cls_attributes and "enum" in cls_attributes["activity_id"]:
+                activity_enum = cls_attributes["activity_id"]["enum"]
+                for activity_enum_key, activity_enum_value in activity_enum.items():
+                    enum_key = str(class_uid_scoped_type_uid(cls_uid, int(activity_enum_key)))
+                    enum_value = deepcopy(activity_enum_value)
+                    enum_caption = f"{cls_caption}: {activity_enum_value.get("caption", "<unknown>")}"
+                    enum_value["caption"] = enum_caption
+                    type_uid_enum[enum_key] = enum_value
+            else:
+                raise SchemaException(f'Class "{cls_key}" has invalid "activity_id" definition: "enum" not defined')
+
+            type_uid_enum[str(class_uid_scoped_type_uid(cls_uid, 0))] = {
+                "caption": f"{cls_caption}: Unknown",
+            }
+
+            type_uid_attribute["enum"] = type_uid_enum
+
+            # TODO: add class uid
+            # TODO: add category uid
             pass
 
     def _process_objects(self) -> None:
+        # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
+        # the observable type_id will be propagated to all children of an object.
         self._observables_from_objects()
-        # TODO: process objects:
-        #       - observables (detect collisions, build up information for schema browser)
-        #       - patches (patching extends)
-        #       - resolve (flatten) inheritance (normal extends)
-        #       - save informational complete object hierarchy (for schema browser)
-        #       - remove "hidden" intermediate objects
-        for object_name, object_detail in self._objects.items():
-            pass
+
+        self._resolve_patches(self._objects, self._object_patches, "object")
+        self._resolve_extends(self._objects, "object")
+
+        # Save informational complete object hierarchy (for schema browser)
+        # TODO: only do this when self.include_browser_data is True?
+        for obj_key, obj in self._objects.items():
+            obj_slice = {}
+            for k in ["name", "caption", "extends", "extension"]:
+                if k in obj:
+                    obj_slice[k] = obj[k]
+                obj_slice["is_hidden"] = _is_hidden_object(obj_key)
+            self._all_objects[obj_key] = obj_slice
+
+        # Remove hidden objects
+        self._objects = {name: obj for name, obj in self._objects.items() if not _is_hidden_object(name)}
 
     def _observables_from_classes(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
-        for class_name, class_detail in self._classes.items():
-            context = "base schema"
-            self._validate_class_observables(class_name, class_detail, "base schema", is_patch=False)
-            self._observables_from_item_attributes(self._classes, class_name, class_detail, "Class", is_patch=False)
-            self._observables_from_item_observables(self._classes, class_name, class_detail, "Class",is_patch=False)
+        for cls_key, cls in self._classes.items():
+            self._validate_class_observables(cls_key, cls, "base schema", is_patch=False)
+            self._observables_from_item_attributes(self._classes, cls_key, cls, "Class", is_patch=False)
+            self._observables_from_item_observables(self._classes, cls_key, cls, "Class", is_patch=False)
 
-        for patch_name, patch_detail_list in self._class_patches.items():
-            for patch_detail in patch_detail_list:
-                context = f'"{patch_detail["extension"]}" extension patch'
-                self._validate_class_observables(patch_name, patch_detail, context, is_patch=True)
-                self._observables_from_item_attributes(self._classes, patch_name, patch_detail, "Class", is_patch=True)
-                self._observables_from_item_observables(self._classes, patch_name, patch_detail, "Class", is_patch=True)
+        for patch_key, patch_list in self._class_patches.items():
+            for patch in patch_list:
+                context = f'"{patch["extension"]}" extension patch'
+                self._validate_class_observables(patch_key, patch, context, is_patch=True)
+                self._observables_from_item_attributes(self._classes, patch_key, patch, "Class", is_patch=True)
+                self._observables_from_item_observables(self._classes, patch_key, patch, "Class", is_patch=True)
 
     @staticmethod
-    def _validate_class_observables(class_name: str, class_detail: JObject, context: str, is_patch: bool) -> None:
-        if "observable" in class_detail:
+    def _validate_class_observables(cls_key: str, cls: JObject, context: str, is_patch: bool) -> None:
+        if "observable" in cls:
             raise SchemaException(
                 f'Illegal definition of one or more attributes with "observable" in {context} class'
-                f' "{class_name}". Defining class-level observables is not supported (this would be'
+                f' "{cls_key}". Defining class-level observables is not supported (this would be'
                 f' redundant). Instead use the "class_uid" attribute for querying, correlating, and'
                 f' reporting.')
 
-        if not is_patch and _is_hidden_class(class_name, class_detail):
-            attributes = class_detail.setdefault("attributes", {})
-            for attribute_detail in attributes.values():
-                if "observable" in attribute_detail:
+        if not is_patch and _is_hidden_class(cls_key, cls):
+            attributes = cls.setdefault("attributes", {})
+            for attribute in attributes.values():
+                if "observable" in attribute:
                     raise SchemaException(
                         f'Illegal definition of one or more attributes with "observable" definition in'
-                        f' {context} hidden class "{class_name}". This would cause colliding definitions'
+                        f' {context} hidden class "{cls_key}". This would cause colliding definitions'
                         f' of the same observable type_id values in all children of this class. Instead,'
-                        f' define observables (of any kind) in non-hidden child classes of "{class_name}".')
+                        f' define observables (of any kind) in non-hidden child classes of "{cls_key}".')
 
-            if "observables" in class_detail:
+            if "observables" in cls:
                 raise SchemaException(
-                    f'Illegal "observables" definition in {context} hidden class "{class_name}".'
+                    f'Illegal "observables" definition in {context} hidden class "{cls_key}".'
                     f' This would cause colliding definitions of the same observable type_id values in'
                     f' all children of this class. Instead, define observables (of any kind) in'
-                    f' non-hidden child classes of "{class_name}".')
+                    f' non-hidden child classes of "{cls_key}".')
 
     def _observables_from_objects(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
-        for object_name, object_detail in self._objects.items():
+        for obj_key, obj in self._objects.items():
             context = "base schema"
-            self._validate_object_observables(object_name, object_detail, "base schema", is_patch=False)
-            self._observables_from_object(object_name, object_detail, context)
-            self._observables_from_item_attributes(self._objects, object_name, object_detail, "Object", is_patch=False)
+            self._validate_object_observables(obj_key, obj, "base schema", is_patch=False)
+            self._observables_from_object(obj_key, obj, context)
+            self._observables_from_item_attributes(self._objects, obj_key, obj, "Object", is_patch=False)
             # Not supported:
-            # self._observables_from_item_observables(
-            #     self._objects, object_name, object_detail, "Object", is_patch=False)
+            # self._observables_from_item_observables(self._objects, obj_key, obj, "Object", is_patch=False)
 
-        for patch_name, patch_detail_list in self._object_patches.items():
-            for patch_detail in patch_detail_list:
-                context = f'"{patch_detail["extension"]}" extension patch'
-                self._validate_object_observables(patch_name, patch_detail, context, is_patch=True)
-                self._observables_from_object(patch_name, patch_detail, context)
-                self._observables_from_item_attributes(self._objects, patch_name, patch_detail, "Object", is_patch=True)
+        for patch_key, patch_list in self._object_patches.items():
+            for patch in patch_list:
+                context = f'"{patch["extension"]}" extension patch'
+                self._validate_object_observables(patch_key, patch, context, is_patch=True)
+                self._observables_from_object(patch_key, patch, context)
+                self._observables_from_item_attributes(self._objects, patch_key, patch, "Object", is_patch=True)
                 # Not supported:
-                # self._observables_from_item_observables(
-                #     self._objects, patch_name, patch_detail, "Object", is_patch=True)
+                # self._observables_from_item_observables(self._objects, patch_key, patch, "Object", is_patch=True)
 
     @staticmethod
-    def _validate_object_observables(object_name: str, object_detail: JObject, context: str, is_patch: bool) -> None:
-        if "observables" in object_detail:
+    def _validate_object_observables(obj_key: str, obj: JObject, context: str, is_patch: bool) -> None:
+        if "observables" in obj:
             # Attribute-path observables would be tricky to implement as an machine-driven enrichment.
             # It would require tracking the relative from the point of the object down that tree of an
             # overall OCSF event.
             raise SchemaException(
-                f'Illegal "observables" definition in {context} object "{object_name}".'
+                f'Illegal "observables" definition in {context} object "{obj_key}".'
                 f' Object-specific attribute path observables are not supported.'
                 f' Please file an issue if you find this feature necessary.')
 
-        if not is_patch and _is_hidden_object(object_name):
-            attributes = object_detail.setdefault("attributes", {})
+        if not is_patch and _is_hidden_object(obj_key):
+            attributes = obj.setdefault("attributes", {})
             for attribute_detail in attributes.values():
                 if "observable" in attribute_detail:
                     raise SchemaException(
                         f'Illegal definition of one or more attributes with "observable" definition in'
-                        f' {context} hidden object "{object_name}". This would cause colliding definitions'
+                        f' {context} hidden object "{obj_key}". This would cause colliding definitions'
                         f' of the same observable type_id values in all children of this object. Instead,'
-                        f' define observables (of any kind) in non-hidden child objects of "{object_name}".')
+                        f' define observables (of any kind) in non-hidden child objects of "{obj_key}".')
 
-            if "observable" in object_detail:
+            if "observable" in obj:
                 raise SchemaException(
-                    f'Illegal "observable" definition in {context} hidden object "{object_name}".'
+                    f'Illegal "observable" definition in {context} hidden object "{obj_key}".'
                     f' This would cause colliding definitions of the same observable type_id values in'
                     f' all children of this object. Instead, define observables (of any kind) in'
-                    f' non-hidden child objects of "{object_name}".')
+                    f' non-hidden child objects of "{obj_key}".')
 
-    def _observables_from_object(self, object_name: str, object_detail: JObject, context: str) -> None:
-        pass # TODO
+    def _observables_from_object(self, obj_key: str, obj: JObject, context: str) -> None:
+        caption = self._find_item_caption(self._objects, obj_key, obj)
+        if "observable" in obj:
+            observable_type_id = str(obj["observable"])
+
+            if observable_type_id in self._observable_type_id_dict:
+                raise SchemaException(
+                    f'Collision of observable type_id {observable_type_id} between'
+                    f' "{caption}" object "observable" and'
+                    f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+
+            self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
+                caption, caption, "Object")
 
     def _observables_from_item_attributes(
-            self,
-            items: JObject,
-            item_name: str,
-            item: JObject,
-            kind: str,  # title-case kind; should be "Class" or "Object"
-            is_patch: bool,
+        self,
+        items: JObject,
+        item_key: str,
+        item: JObject,
+        kind: str,  # title-case kind; should be "Class" or "Object"
+        is_patch: bool,
     ) -> None:
         if is_patch:
-            caption = self._find_parent_item_caption(items, item_name, item)
+            caption = self._find_parent_item_caption(items, item_key, item)
         else:
-            caption = self._find_item_caption(items, item_name, item)
-        for attribute_name, attribute_detail in item.setdefault("attributes", {}).items():
-            if "observable" in attribute_detail:
-                observable_type_id = attribute_detail["observable"]
+            caption = self._find_item_caption(items, item_key, item)
+        for attribute_key, attribute in item.setdefault("attributes", {}).items():
+            if "observable" in attribute:
+                observable_type_id = str(attribute["observable"])
+
                 if observable_type_id in self._observable_type_id_dict:
                     raise SchemaException(
                         f'Collision of observable type_id {observable_type_id} between'
-                        f' "{caption}" {kind} attribute "{attribute_name}" and'
+                        f' "{caption}" {kind} attribute "{attribute_key}" and'
                         f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+
                 self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
-                    f"{caption} {kind}: {attribute_name}",
-                    f'{kind}-specific attribute "{attribute_name}" for the {caption} {kind}.',
+                    f"{caption} {kind}: {attribute_key}",
+                    f'{kind}-specific attribute "{attribute_key}" for the {caption} {kind}.',
                     f"{kind}-Specific Attribute")
 
     def _observables_from_item_observables(
-            self,
-            items: JObject,
-            item_name: str,
-            item: JObject,
-            kind: str,  # title-case kind; should be "Class" or "Object"
-            is_patch: bool,
+        self, items: JObject, item_key: str, item: JObject, kind: str, is_patch: bool
     ) -> None:
+        # kind should be title-case: "Class" or "Object"
         if "observables" in item:
             if is_patch:
-                caption = self._find_parent_item_caption(items, item_name, item)
+                caption = self._find_parent_item_caption(items, item_key, item)
             else:
-                caption = self._find_item_caption(items, item_name, item)
-            for attribute_path, observable_type_id in item["observables"].items():
+                caption = self._find_item_caption(items, item_key, item)
+            for attribute_path, observable_type_id_num in item["observables"].items():
+                observable_type_id = str(observable_type_id_num)
                 if observable_type_id in self._observable_type_id_dict:
                     raise SchemaException(
                         f'Collision of observable type_id {observable_type_id} between'
                         f' "{caption}" {kind} attribute path "{attribute_path}" and'
                         f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+
                 self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
                     f"{caption} {kind}: {attribute_path}",
                     f'{kind}-specific attribute "{attribute_path}" for the {caption} {kind}.',
@@ -722,27 +795,119 @@ class SchemaCompiler:
         }
 
     @staticmethod
-    def _find_item_caption(items: JObject, item_name: str, item: JObject) -> str:
+    def _find_item_caption(items: JObject, item_key: str, item: JObject) -> str:
         if "caption" in item:
             return item["caption"]
-        return SchemaCompiler._find_parent_item_caption(items, item_name, item)
+        return SchemaCompiler._find_parent_item_caption(items, item_key, item)
 
     @staticmethod
-    def _find_parent_item_caption(items: JObject, item_name: str, item: JObject) -> str:
+    def _find_parent_item_caption(items: JObject, item_key: str, item: JObject) -> str:
         current_item = item
         while True:
             if "extends" in item:
-                parent_name = current_item["extends"]
-                if parent_name in items:
-                    parent_item = items[parent_name]
+                parent_key = current_item["extends"]
+                if parent_key in items:
+                    parent_item = items[parent_key]
                     if "caption" in parent_item:
                         return parent_item["caption"]
                     current_item = parent_item
                 else:
-                    raise SchemaException(f'Ancestor "{parent_name}" of "{item_name}" is undefined.')
+                    raise SchemaException(f'Ancestor "{parent_key}" of "{item_key}" is undefined.')
             else:
                 break
-        return item_name  # fallback
+        return item_key  # fallback
+
+    @staticmethod
+    def _resolve_patches(items: JObject, patches: PatchDict, kind: str) -> None:
+        for patch_key, patch_list in patches.items():
+            for patch in patch_list:
+                base_key = patch["extends"]  # this will be the same as patch_name
+                assert patch_key == base_key, "Patch name should match extends base name"
+                extension_name = patch.get("extension", "<unknown>")
+                logger.info('"%s" %s from "%s" extension is patching "%s"', patch_key, kind, extension_name, base_key)
+                if base_key not in items:
+                    raise SchemaException(f'"{patch_key}" {kind} from "{extension_name}" extension'
+                                          f' is attempting to patch undefined {kind} "{base_key}"')
+                base = items[base_key]
+                SchemaCompiler._merge_profiles(base, patch)
+                deep_merge(base.setdefault("attributes", {}), patch.setdefault("attributes", {}))
+                # Top-level observable.
+                # Only occurs in objects, but is safe to do for classes too.
+                put_non_none(base, "observable", patch.get("observable"))
+                # Top-level path-based observables.
+                # Only occurs in classes, but is safe to do for objects too.
+                put_non_none(base, "observables", patch.get("observables"))
+                put_non_none(base, "references", patch.get("references"))
+                # Top-level attribute associations.
+                # Only occurs in classes, but is safe to do for objects too.
+                put_non_none(base, "associations", patch.get("associations"))
+                SchemaCompiler._patch_constraints(base, patch)
+
+    @staticmethod
+    def _merge_profiles(dest: JObject, source: JObject) -> None:
+        dest_profiles = set(dest.get("profiles", []))
+        source_profiles = set(source.get("profiles", []))
+        merged = dest_profiles.union(source_profiles)
+        if merged:  # avoid adding "profiles" if neither base nor patch had any
+            dest["profiles"] = sorted(merged)  # sorts and converts to list (otherwise profiles are randomly sorted)
+
+    @staticmethod
+    def _patch_constraints(base: JObject, patch: JObject) -> None:
+        if "constraints" in patch:
+            constraints = patch["constraints"]
+            if constraints:
+                base["constraints"] = constraints
+            else:
+                # Remove base constraints if patch explicitly defines an empty constraints list
+                del base["constraints"]
+
+    @staticmethod
+    def _resolve_extends(items: JObject, kind: str) -> None:
+        for item_key, item in items.items():
+            SchemaCompiler._resolve_item_extends(items, item_key, item, kind)
+
+    @staticmethod
+    def _resolve_item_extends(items: JObject, item_key: str, item: JObject, kind: str) -> None:
+        if item_key is None or item is None:
+            return
+
+        parent_key = item.get("extends")
+        SchemaCompiler._resolve_item_extends(items, parent_key, items.get(parent_key), kind)
+
+        parent_key = item.get("extends")  # re-get extends in case it was changed
+
+        if parent_key:
+            parent_item = items.get(parent_key)
+            if parent_item:
+                # Create flattened item by merging item on top of a copy of it's parent with the result
+                # that new and overlapping things in item "win" over those in parent.
+                # This new item replaces the existing one.
+                new_item = deepcopy(parent_item)
+                # The values of most keys simply replace what is in the parent, except for attributes and profiles
+                for source_key, source_value in item.items():
+                    if source_key == "attributes":
+                        new_attributes = new_item.get("attributes", {})
+                        deep_merge(new_attributes, source_value)
+                        # Remove any keys that have null (None) values
+                        # TODO: This doesn't seem to happen. Still needed?
+                        for k, v in new_attributes.items():
+                            if v is None:
+                                logger.debug('Attribute "%s" is None in %s "%s"', k, kind, item_key)
+                        new_attributes = dict((k, v) for k, v in new_attributes.items() if v is not None)
+                        new_item["attributes"] = new_attributes
+                    elif source_key == "profiles":
+                        SchemaCompiler._merge_profiles(new_item, item)
+                    else:
+                        # Only replace value if source isn't None (JSON null)
+                        # TODO: This doesn't seem to happen. Still needed?
+                        if source_value is not None:
+                            new_item[source_key] = source_value
+                        else:
+                            logger.debug('Not merging null value of key "%s" in %s "%s"', source_key, kind, item_key)
+                items[item_key] = new_item
+            else:
+                raise SchemaException(f'"{item.get("name", "<unknown>")}" {kind}'
+                                      f' extends undefined {kind} "{parent_key}"')
 
 
 def _read_json_object_file(path: Path) -> JObject:
@@ -755,7 +920,7 @@ def _read_json_object_file(path: Path) -> JObject:
 
 
 def _read_structured_items(
-        base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
+    base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
 ) -> JObject:
     """
     Read schema structured items found in `kind` directory under `base_path`, recursively, and returns dict with
@@ -778,9 +943,8 @@ def _read_structured_items(
 
                 # Ensure name is a string
                 if not isinstance(name, str):
-                    t = json_type_from_value(name)
-                    raise SchemaException(
-                        f'The "name" value in {kind} file must be a string but got {t}: {file_path}')
+                    raise SchemaException(f'The "name" value in {kind} file must be a string,'
+                                          f' but got {json_type_from_value(name)}: {file_path}')
 
                 if name not in items:
                     items[name] = obj
@@ -828,13 +992,11 @@ def _read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObjec
 
                 # Ensure values are strings
                 if name and not isinstance(name, str):
-                    t = json_type_from_value(name)
-                    raise SchemaException(
-                        f'Extension {kind} file "name" value must be a string but got {t}: {file_path}')
+                    raise SchemaException(f'Extension {kind} file "name" value must be a string,'
+                                          f' but got {json_type_from_value(name)}: {file_path}')
                 if extends and not isinstance(extends, str):
-                    t = json_type_from_value(extends)
-                    raise SchemaException(
-                        f'Extension {kind} file "extends" value must be a string but got {t}: {file_path}')
+                    raise SchemaException(f'Extension {kind} file "extends" value must be a string,'
+                                          f' but got {json_type_from_value(extends)}: {file_path}')
 
                 if name and name != extends:  # if not a patch
                     if name not in items:
@@ -847,36 +1009,36 @@ def _read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObjec
                                               f' collides with {kind} with caption "{existing_caption}",'
                                               f' file: {file_path}')
                 elif extends:  # if a patch
-                    patch_name = extends
-                    if patch_name not in patches:
-                        patches[patch_name] = obj
+                    patch_key = extends
+                    if patch_key not in patches:
+                        patches[patch_key] = obj
                     else:
-                        existing = patches[patch_name]
+                        existing = patches[patch_key]
                         current_caption = obj.get("caption", "")
                         existing_caption = existing.get("caption", "")
                         raise SchemaException(f'Collision of extension {kind} patch name ("extends" key):'
-                                              f' "{patch_name}", caption "{current_caption}",'
+                                              f' "{patch_key}", caption "{current_caption}",'
                                               f' collides with {kind} with caption "{existing_caption}",'
                                               f' file: {file_path}')
                 else:
-                    raise SchemaException(
-                        f'Extension {kind} file does not have a "name" or "extends" attribute: {file_path}')
+                    raise SchemaException(f'Extension {kind} file does not have a "name" or "extends" attribute:'
+                                          f' {file_path}')
     return items, patches
 
 
-def _is_hidden_class(class_name: str, class_detail: JObject) -> bool:
-    return class_name != "base_event" and "uid" not in class_detail
+def _is_hidden_class(cls_key: str, cls: JObject) -> bool:
+    return cls_key != "base_event" and "uid" not in cls
 
 
-def _is_hidden_object(object_name: str) -> bool:
-    return object_name.startswith("_")
+def _is_hidden_object(obj_key: str) -> bool:
+    return obj_key.startswith("_")
 
 
 def schema_compile(
-        schema_path: Path,
-        ignore_platform_extensions: bool,
-        extensions_paths: list[Path],
-        include_browser_data: bool,
+    schema_path: Path,
+    ignore_platform_extensions: bool,
+    extensions_paths: list[Path],
+    include_browser_data: bool,
 ) -> Schema:
     schema_compiler = SchemaCompiler(schema_path, ignore_platform_extensions, extensions_paths, include_browser_data)
     return schema_compiler.compile()

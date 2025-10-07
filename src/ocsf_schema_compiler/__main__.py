@@ -60,7 +60,8 @@ def main():
     logger.info("Compile successful")
     # TODO: final version: print(json.dumps(schema, cls=DataclassEncoder))
     # TODO: debugging friendly version:
-    print(json.dumps(schema, cls=DataclassEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema, cls=DataclassEncoder, indent=2, sort_keys=True))
+    print(json.dumps(schema.classes["ssh_activity"], cls=DataclassEncoder, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':
