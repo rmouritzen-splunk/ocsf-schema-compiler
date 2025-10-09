@@ -10,7 +10,7 @@ from compiler import schema_compile
 logger = logging.getLogger(__name__)
 
 
-class DataclassEncoder(json.JSONEncoder):
+class CustomEncoder(json.JSONEncoder):
     def default(self, obj):
         if dataclasses.is_dataclass(obj):
             return dataclasses.asdict(obj)
@@ -58,10 +58,11 @@ def main():
     schema = schema_compile(
         args.path, args.ignore_platform_extensions, args.extensions_paths, args.include_browser_data)
     logger.info("Compile successful")
-    # TODO: final version: print(json.dumps(schema, cls=DataclassEncoder))
+    # TODO: final version: print(json.dumps(schema, cls=CustomEncoder))
     # TODO: debugging friendly version:
-    # print(json.dumps(schema, cls=DataclassEncoder, indent=2, sort_keys=True))
-    print(json.dumps(schema.classes["ssh_activity"], cls=DataclassEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))
+    print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':
