@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from sys import stderr
 
-from compiler import schema_compile
+from compiler import SchemaCompiler
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,11 @@ def main():
         default=False,
         help="include extra data needed by the schema browser (the OCSF Server)")
     parser.add_argument(
+        "-t", "--tolerate-errors",
+        action="store_true",
+        default=False,
+        help="tolerate common extension errors during schema compilation")
+    parser.add_argument(
         "-l", "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="INFO",
@@ -55,14 +60,16 @@ def main():
 
     logging.basicConfig(format="%(levelname)s: %(message)s", style="%", stream=stderr, level=args.log_level)
 
-    schema = schema_compile(
-        args.path, args.ignore_platform_extensions, args.extensions_paths, args.include_browser_data)
-    logger.info("Compile successful")
-    # TODO: final version: print(json.dumps(schema, cls=CustomEncoder))
+    compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
+                              args.include_browser_data, args.tolerate_errors)
+    schema = compiler.compile()
+    # TODO: final version:
+    #   print(json.dumps(schema, cls=CustomEncoder))
     # TODO: debugging friendly version:
     # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))
-    print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
+    print(json.dumps(schema.objects["policy"], cls=CustomEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':

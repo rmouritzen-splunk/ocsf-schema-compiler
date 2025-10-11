@@ -1,5 +1,7 @@
 from typing import Any
 
+from jsonish import JObject
+
 
 def deep_merge(dest: Any, source: Any) -> None:
     """
@@ -19,30 +21,17 @@ def deep_merge(dest: Any, source: Any) -> None:
                 dest[source_key] = source_value
 
 
-def json_type_from_value(value: Any) -> str:
-    """Return JSON type for a Python value. See https://json.org. This is intended for error messages."""
-    if isinstance(value, dict):
-        return "object"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, int):
-        return "number (int)"
-    if isinstance(value, float):
-        return "number (float)"
-    if isinstance(value, bool):
-        if value:
-            return "true"
-        return "false"
-    if value is None:
-        return "null"
-    return f"non-JSON type: {type(value).__name__}"
-
-
 def put_non_none(d: dict, k: Any, v: Any) -> None:
     if v is not None:
         d[k] = v
+
+
+def is_hidden_class(cls_name: str, cls: JObject) -> bool:
+    return cls_name != "base_event" and "uid" not in cls
+
+
+def is_hidden_object(obj_name: str) -> bool:
+    return obj_name.startswith("_")
 
 
 def extension_scoped_category_uid(extension_uid: int, original_category_uid: int) -> int:

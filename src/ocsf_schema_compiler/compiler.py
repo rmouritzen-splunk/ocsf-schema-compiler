@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from copy import deepcopy
@@ -6,29 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from exceptions import SchemaException
+from jsonish import (
+    JObject, json_type_from_value, read_json_object_file, read_structured_items, read_patchable_structured_items
+)
 from utils import (
-    deep_merge, json_type_from_value, put_non_none,
+    deep_merge, put_non_none,
+    is_hidden_class, is_hidden_object,
     extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid
 )
 
 logger = logging.getLogger(__name__)
-
-
-class SchemaException(Exception):
-    pass
-
-
-# Type aliases for JSON-compatible types. See https://json.org.
-# Yes, these are circular, and Python is OK with that.
-# As with all Python type hints, these improve code readability and help IDEs identify type mismatches.
-
-# JValue is type alias for types compatible with JSON values.
-type JValue = JObject | JArray | str | int | float | bool | None
-# JObject is a type alias for dictionary compatible with a JSON object.
-type JObject = dict[str, JValue]
-# JArray is a type alias for types compatible with a JSON array.
-# Note: a custom encoder is required to encode Python sets.
-type JArray = list[JValue] | tuple[JValue]
 
 
 @dataclass
@@ -70,12 +57,14 @@ class SchemaCompiler:
         schema_path: Path,
         ignore_platform_extensions: bool,
         extensions_paths: Optional[list[Path]],
-        include_browser_data: bool
+        include_browser_data: bool = False,
+        tolerate_errors: bool = False,
     ) -> None:
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
         self.extensions_paths: Optional[list[Path]] = extensions_paths
         self.include_browser_data: bool = include_browser_data
+        self.tolerate_errors: bool = tolerate_errors
 
         logger.info("Schema path: %s", self.schema_path)
         if self.ignore_platform_extensions:
@@ -86,8 +75,12 @@ class SchemaCompiler:
             logger.info("Including extensions path(s): %s", ", ".join(list(map(str, self.extensions_paths))))
         if self.include_browser_data:
             logger.info("Including extra information needed by the schema browser (the OCSF Server)")
+        else:
+            logger.info("Not including extra information needed by the schema browser (the OCSF Server)")
 
-        self._is_compiled = False
+        self._is_compiled: bool = False
+        self._error_count: int = 0
+        self._warning_count: int = 0
         self._version: str = "0.0.0"  # cached to use as fallback for extension versions
         self._categories: JObject = {}
         self._dictionary: JObject = {}
@@ -97,7 +90,10 @@ class SchemaCompiler:
         self._objects: JObject = {}
         # object patches consolidated from all extensions
         self._object_patches: PatchDict = {}
+        # Profile keyed by name only (unscoped names)
         self._profiles: JObject = {}
+        # Same self._profiles as above, but using extension scoped names
+        self._extension_scoped_profiles: JObject = {}
         self._include_cache: dict[Path, JObject] = {}
         # Observable type_id values extracted from all observable sources
         # Used to detect collisions and populate the observable object's type_id enum
@@ -129,6 +125,7 @@ class SchemaCompiler:
         self._merge_classes_from_extensions(extensions)
         self._merge_objects_from_extensions(extensions)
         self._merge_dictionary_from_extensions(extensions)
+        self._merge_profiles_from_extensions(extensions)
 
         self._consolidate_extension_patches(extensions)
 
@@ -138,15 +135,21 @@ class SchemaCompiler:
         self._process_objects()
 
         self._enrich_and_validate_dictionary()
+        self._observables_from_dictionary()
 
-        # TODO: observables from dictionary (in Elixir, Cache..observables_from_dictionary/2)
-        # TODO: process profiles (in Elixir JsonReady.read_profiles / Cache.update_profiles)
-        #       or do this while resolving includes?
-        # TODO: More objects processing:
-        #       Utils.update_objects, Cache.update_observable, Cache.update_objects, Cache.final_check
-        # TODO: Profiles.sanity_check
-        # TODO: More classes processing:
-        #       Cache.update_classes, Cache.final_check
+        self._enrich_profiles_attributes_from_dictionary()
+        self._validate_profiles_and_add_item_links("object", self._objects)
+
+        self._add_object_links()
+        # TODO: More objects processing: Cache.update_observable
+        # TODO: More objects processing: Cache.update_objects
+        # TODO: More objects processing: Cache.final_check
+
+        # TODO: Profiles.sanity_check classes
+        self._validate_profiles_and_add_item_links("class", self._classes)
+
+        # TODO: More classes processing: Cache.update_classes
+        # TODO: More classes processing: Cache.final_check
         # TODO: Extract and further process base_event: Cache.final_check
         #       NOTE: This doesn't seem necessary since in Python we are updating in-place.
         # TODO: Fix entities (fix up / track missing attribute "requirement" values)
@@ -161,6 +164,19 @@ class SchemaCompiler:
         # TODO: Double-check compiled schema: diff against Elixir-generated schema
         # TODO: Handle include_browser_data. Probably strip keys with leading underscores
         #       (as opposed to skipping adding browser information, which would skip some validation checks).
+        # TODO: Support item attributes affected by more than one profile.
+        #       Change attribute "profile", a string, to "profiles", an array of strings. At least in new output format.
+        #       Legacy output format can continue with "profile" and use a a comma-separated string.
+        #
+
+        if self._error_count and self._warning_count:
+            logger.error("Compile completed with %d error(s) and %d warning(s)", self._error_count, self._warning_count)
+        elif self._error_count and not self._warning_count:
+            logger.error("Compile completed with %d error(s)", self._error_count)
+        elif self._warning_count:
+            logger.warning("Compile completed with %d warnings(s)", self._warning_count)
+        else:
+            logger.info("Compile completed successfully")
 
         return Schema(
             version=self._version,
@@ -172,18 +188,36 @@ class SchemaCompiler:
             # TODO: add extensions information
         )
 
+    def _tolerable_error(self, exception: SchemaException) -> None:
+        """
+        Log or raise exception for a particular schema error.
+
+        Some forms of errors can be tolerated but should be fixed. These mainly occur with schema extensions that are
+        not routinely validated against the OCSF metaschema.
+        """
+        # TODO: Remove all of this tolerable error stuff after the "splunk" extension is fixed
+        if self.tolerate_errors:
+            self._error_count += 1
+            logger.error("Schema error: %s", str(exception))
+        else:
+            raise exception
+
+    def _warning(self, message: str, *args, **kwargs) -> None:
+        self._warning_count += 1
+        logger.warning(message, *args, **kwargs)
+
     def _read_base_schema(self):
         self._read_version()
-        self._categories = _read_json_object_file(self.schema_path / "categories.json")
-        self._dictionary = _read_json_object_file(self.schema_path / "dictionary.json")
-        self._classes = _read_structured_items(self.schema_path, "events")
-        self._objects = _read_structured_items(self.schema_path, "objects")
+        self._categories = read_json_object_file(self.schema_path / "categories.json")
+        self._dictionary = read_json_object_file(self.schema_path / "dictionary.json")
+        self._classes = read_structured_items(self.schema_path, "events")
+        self._objects = read_structured_items(self.schema_path, "objects")
         self._profiles = self._read_and_enrich_profiles()
 
     def _read_version(self) -> None:
         version_path = self.schema_path / "version.json"
         try:
-            obj = _read_json_object_file(version_path)
+            obj = read_json_object_file(version_path)
             self._version = obj["version"]
         except FileNotFoundError as e:
             raise SchemaException(
@@ -224,7 +258,7 @@ class SchemaCompiler:
         # This should only be called after we know that extension.json exists in base_path,
         # so there's no need for extra error handling.
         extension_info_path = base_path / "extension.json"
-        info = _read_json_object_file(extension_info_path)
+        info = read_json_object_file(extension_info_path)
 
         uid = info.get("uid")
         name = info.get("name")
@@ -237,16 +271,16 @@ class SchemaCompiler:
 
         categories_path = base_path / "categories.json"
         if categories_path.is_file():
-            categories = _read_json_object_file(categories_path)
+            categories = read_json_object_file(categories_path)
         else:
             categories = {}
 
-        classes, class_patches = _read_patchable_structured_items(base_path, "events")
-        objects, object_patches = _read_patchable_structured_items(base_path, "objects")
+        classes, class_patches = read_patchable_structured_items(base_path, "events")
+        objects, object_patches = read_patchable_structured_items(base_path, "objects")
 
         dictionary_path = base_path / "dictionary.json"
         if dictionary_path.is_file():
-            dictionary = _read_json_object_file(base_path / "dictionary.json")
+            dictionary = read_json_object_file(base_path / "dictionary.json")
         else:
             dictionary = {}
 
@@ -309,6 +343,10 @@ class SchemaCompiler:
                 dictionary_attribute["extension"] = extension.name
                 dictionary_attribute["extension_id"] = extension.uid
 
+            for dictionary_type in extension.dictionary.setdefault("types", {}).setdefault("attributes", {}).values():
+                dictionary_type["extension"] = extension.name
+                dictionary_type["extension_id"] = extension.uid
+
             for profile in extension.profiles.values():
                 profile["extension"] = extension.name
                 profile["extension_id"] = extension.uid
@@ -317,13 +355,13 @@ class SchemaCompiler:
                     profile_attribute["extension_id"] = extension.uid
 
     def _read_and_enrich_profiles(self) -> JObject:
-        return _read_structured_items(self.schema_path, "profiles", self._enrich_profile)
+        return read_structured_items(self.schema_path, "profiles", self._enrich_profile)
 
     def _read_and_enrich_extension_profiles(
         self, extension_id: int, extension_name: str, base_path: Path
     ) -> JObject:
         item_callback = lambda path, item: self._enrich_extension_profile(extension_id, extension_name, path, item)
-        return _read_structured_items(base_path, "profiles", item_callback)
+        return read_structured_items(base_path, "profiles", item_callback)
 
     def _enrich_profile(self, path: Path, profile: JObject) -> None:
         attributes = profile.setdefault("attributes", {})
@@ -460,15 +498,15 @@ class SchemaCompiler:
         #
         # attributes may have been modified, so we need to get them again, though now we know they exist
         item_attributes = item["attributes"]
-        for attribute_key, attribute in item_attributes.items():
+        for attribute_name, attribute in item_attributes.items():
             if isinstance(attribute, dict) and "$include" in attribute:
-                sub_context = f"{context} attributes.{attribute_key}.$include"
+                sub_context = f"{context} attributes.{attribute_name}.$include"
                 # Get $include value and remove it from attribute
                 include_value = attribute.pop("$include")
                 if isinstance(include_value, str):
                     include_path = path_resolver(include_value)
                     self._merge_attribute_detail_include(
-                        item_attributes, attribute_key, attribute, sub_context, include_path)
+                        item_attributes, attribute_name, attribute, sub_context, include_path)
                 else:
                     raise TypeError(f"Illegal {sub_context} value type: expected string,"
                                     f" but got {json_type_from_value(include_value)}")
@@ -481,7 +519,7 @@ class SchemaCompiler:
         if "attributes" in include_item:
             attributes = deepcopy(include_item["attributes"])
         else:
-            logger.warning("Include file suspiciously has no attributes: %s", include_path)
+            self._warning("Include file suspiciously has no attributes: %s", include_path)
             return  # Nothing to merge. This should never happen, but is possible.
 
         # item["attributes"] should exist at this point, so no need to double-check
@@ -493,7 +531,7 @@ class SchemaCompiler:
     def _merge_attribute_detail_include(
         self,
         attributes: JObject,
-        attribute_key: str,
+        attribute_name: str,
         attribute: JObject,
         context: str,
         include_path: Path) -> None:
@@ -506,18 +544,24 @@ class SchemaCompiler:
         # Merge original attribute detail on top of the copy of the included attribute_detail, preferring the original
         deep_merge(new_attribute, attribute)
         # replace existing attribute detail with the new merged detail
-        attributes[attribute_key] = new_attribute
+        attributes[attribute_name] = new_attribute
 
     def _get_include_contents(self, context: str, include_path: Path) -> JObject:
         if include_path in self._include_cache:
             return self._include_cache[include_path]
 
         try:
-            include_item = _read_json_object_file(include_path)
+            include_item = read_json_object_file(include_path)
             self._include_cache[include_path] = include_item
             return include_item
         except FileNotFoundError as e:
             raise SchemaException(f"{context} file does not exist: {include_path}") from e
+
+    def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
+        categories_attributes = self._categories.setdefault("attributes", {})
+        for extension in extensions:
+            ext_categories_attributes = extension.categories.setdefault("attributes", {})
+            deep_merge(categories_attributes, ext_categories_attributes)
 
     def _merge_classes_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -528,26 +572,6 @@ class SchemaCompiler:
         for extension in extensions:
             if extension.objects:
                 self._merge_extension_items(extension.name, extension.objects, self._objects, "object")
-
-    @staticmethod
-    def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str) -> None:
-        for ext_item_key, ext_item in extension_items.items():
-            if ext_item_key in items:
-                item_caption = ext_item.get("caption", "")
-                if "extension" in ext_item:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_key}" collides'
-                                          f' with extension "{ext_item["extension"]}" {kind}'
-                                          f' with caption "{item_caption}"')
-                else:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_key}" collides'
-                                          f' with base schema {kind} with caption "{item_caption}"')
-            items[ext_item_key] = ext_item
-
-    def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
-        categories_attributes = self._categories.setdefault("attributes", {})
-        for extension in extensions:
-            ext_categories_attributes = extension.categories.setdefault("attributes", {})
-            deep_merge(categories_attributes, ext_categories_attributes)
 
     def _merge_dictionary_from_extensions(self, extensions: list[Extension]) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
@@ -562,20 +586,52 @@ class SchemaCompiler:
             ext_dictionary_types_attributes = ext_dictionary_types.setdefault("attributes", {})
             deep_merge(dictionary_types_attributes, ext_dictionary_types_attributes)
 
+    def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            if extension.profiles:
+                self._merge_extension_items(extension.name, extension.profiles, self._profiles, "profile")
+                # Also merge with extension scoped profiles dictionary
+                for profile_name, profile in extension.profiles.items():
+                    scoped_name = f'{extension.name}/{profile_name}'
+                    if scoped_name in self._extension_scoped_profiles:
+                        other_profile = self._extension_scoped_profiles[scoped_name]
+                        raise SchemaException(
+                            f'Collision: extension "{extension.name}" profile with extension scoped name'
+                            f' "{scoped_name}" collides'
+                            f' with extension "{other_profile.get("extension", "")}" profile'
+                            f' with caption "{other_profile.get("caption", "")}"')
+                    else:
+                        self._extension_scoped_profiles[scoped_name] = profile
+
+    @staticmethod
+    def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str
+                               ) -> None:
+        for ext_item_name, ext_item in extension_items.items():
+            if ext_item_name in items:
+                item = items[ext_item_name]
+                if "extension" in item:
+                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} with name "{ext_item_name}"'
+                                          f' collides with extension "{item["extension"]}" {kind}'
+                                          f' with caption "{item.get("caption", "")}"')
+                else:
+                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} with name "{ext_item_name}"'
+                                          f' collides with base schema {kind} with caption "{item.get("caption", "")}"')
+            items[ext_item_name] = ext_item
+
     def _consolidate_extension_patches(self, extensions: list[Extension]) -> None:
         for extension in extensions:
-            for patch_key, patch in extension.class_patches.items():
-                patches = self._class_patches.setdefault(patch_key, [])
+            for patch_name, patch in extension.class_patches.items():
+                patches = self._class_patches.setdefault(patch_name, [])
                 patches.append(patch)
-            for patch_key, patch in extension.object_patches.items():
-                patches = self._object_patches.setdefault(patch_key, [])
+            for patch_name, patch in extension.object_patches.items():
+                patches = self._object_patches.setdefault(patch_name, [])
                 patches.append(patch)
 
     def _enrich_dictionary_object_types(self) -> None:
         """Converts dictionary types not defined in dictionary's types to object types."""
         types = self._dictionary.setdefault("types", {})
         types_attributes = types.setdefault("attributes", {})
-        for attribute_key, attribute in self._dictionary.setdefault("attributes", {}).items():
+        for attribute_name, attribute in self._dictionary.setdefault("attributes", {}).items():
             attribute_type = attribute.get("type")
             if attribute_type not in types_attributes:
                 attribute["type"] = "object_t"
@@ -591,22 +647,22 @@ class SchemaCompiler:
 
         # Save informational complete class hierarchy (for schema browser)
         # TODO: only do this when self.include_browser_data is True?
-        for cls_key, cls in self._classes.items():
+        for cls_name, cls in self._classes.items():
             cls_slice = {}
             for k in ["name", "caption", "extends", "extension"]:
                 if k in cls:
                     cls_slice[k] = cls[k]
-            cls_slice["is_hidden"] = _is_hidden_class(cls_key, cls)
-            self._all_classes[cls_key] = cls_slice
+            cls_slice["is_hidden"] = is_hidden_class(cls_name, cls)
+            self._all_classes[cls_name] = cls_slice
 
         # Remove hidden classes
-        self._classes = {name: cls for name, cls in self._classes.items() if not _is_hidden_class(name, cls)}
+        self._classes = {name: cls for name, cls in self._classes.items() if not is_hidden_class(name, cls)}
 
         self._enrich_classes()
 
     def _enrich_classes(self) -> None:
         # enrich classes
-        for cls_key, cls in self._classes.items():
+        for cls_name, cls in self._classes.items():
             # update class uid
             category_key = cls.get("category")
             category = self._categories.setdefault("attributes", {}).get(category_key)
@@ -633,13 +689,13 @@ class SchemaCompiler:
                     enum_value["caption"] = enum_caption
                     type_uid_enum[enum_key] = enum_value
             else:
-                raise SchemaException(f'Class "{cls_key}" has invalid "activity_id" definition: "enum" not defined')
+                raise SchemaException(f'Class "{cls_name}" has invalid "activity_id" definition: "enum" not defined')
             type_uid_enum[str(class_uid_scoped_type_uid(cls_uid, 0))] = {
                 "caption": f"{cls_caption}: Unknown",
             }
             type_uid_attribute["enum"] = type_uid_enum
             # TODO: Only add when self.include_browser_data is True?
-            type_uid_attribute["_source"] = cls_key
+            type_uid_attribute["_source"] = cls_name
 
             # add class_uid and class_name attributes
             cls_uid_attribute = cls_attributes.setdefault("class_uid", {})
@@ -648,7 +704,7 @@ class SchemaCompiler:
             enum = {cls_uid_key: {"caption": cls_caption, "description": cls.get("description", "")}}
             cls_uid_attribute["enum"] = enum
             # TODO: Only add when self.include_browser_data is True?
-            cls_uid_attribute["_source"] = cls_key
+            cls_uid_attribute["_source"] = cls_name
             cls_name_attribute["description"] = (f"The event class name,"
                                                  f" as defined by class_uid value: <code>{cls_caption}</code>.")
 
@@ -668,11 +724,11 @@ class SchemaCompiler:
                                                           f" <code>{category.get("caption", "")}</code>.)")
             else:
                 if category_key == "other":
-                    logger.info('Class "%s" uses special undefined category "other"', cls_key)
+                    logger.info('Class "%s" uses special undefined category "other"', cls_name)
                 elif category_key is None:
-                    logger.warning('Class "%s" has no category', cls_key)
+                    self._warning('Class "%s" has no category', cls_name)
                 else:
-                    logger.warning('Class "%s" has undefined category "%s"', cls_key, category_key)
+                    self._warning('Class "%s" has undefined category "%s"', cls_name, category_key)
 
     def _process_objects(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
@@ -684,106 +740,106 @@ class SchemaCompiler:
 
         # Save informational complete object hierarchy (for schema browser)
         # TODO: only do this when self.include_browser_data is True?
-        for obj_key, obj in self._objects.items():
+        for obj_name, obj in self._objects.items():
             obj_slice = {}
             for k in ["name", "caption", "extends", "extension"]:
                 if k in obj:
                     obj_slice[k] = obj[k]
-                obj_slice["is_hidden"] = _is_hidden_object(obj_key)
-            self._all_objects[obj_key] = obj_slice
+                obj_slice["is_hidden"] = is_hidden_object(obj_name)
+            self._all_objects[obj_name] = obj_slice
 
         # Remove hidden objects
-        self._objects = {name: obj for name, obj in self._objects.items() if not _is_hidden_object(name)}
+        self._objects = {name: obj for name, obj in self._objects.items() if not is_hidden_object(name)}
 
     def _observables_from_classes(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
-        for cls_key, cls in self._classes.items():
-            self._validate_class_observables(cls_key, cls, "base schema", is_patch=False)
-            self._observables_from_item_attributes(self._classes, cls_key, cls, "Class", is_patch=False)
-            self._observables_from_item_observables(self._classes, cls_key, cls, "Class", is_patch=False)
+        for cls_name, cls in self._classes.items():
+            self._validate_class_observables(cls_name, cls, "base schema", is_patch=False)
+            self._observables_from_item_attributes(self._classes, cls_name, cls, "Class", is_patch=False)
+            self._observables_from_item_observables(self._classes, cls_name, cls, "Class", is_patch=False)
 
-        for patch_key, patch_list in self._class_patches.items():
+        for patch_name, patch_list in self._class_patches.items():
             for patch in patch_list:
                 context = f'"{patch["extension"]}" extension patch'
-                self._validate_class_observables(patch_key, patch, context, is_patch=True)
-                self._observables_from_item_attributes(self._classes, patch_key, patch, "Class", is_patch=True)
-                self._observables_from_item_observables(self._classes, patch_key, patch, "Class", is_patch=True)
+                self._validate_class_observables(patch_name, patch, context, is_patch=True)
+                self._observables_from_item_attributes(self._classes, patch_name, patch, "Class", is_patch=True)
+                self._observables_from_item_observables(self._classes, patch_name, patch, "Class", is_patch=True)
 
     @staticmethod
-    def _validate_class_observables(cls_key: str, cls: JObject, context: str, is_patch: bool) -> None:
+    def _validate_class_observables(cls_name: str, cls: JObject, context: str, is_patch: bool) -> None:
         if "observable" in cls:
             raise SchemaException(
                 f'Illegal definition of one or more attributes with "observable" in {context} class'
-                f' "{cls_key}". Defining class-level observables is not supported (this would be'
+                f' "{cls_name}". Defining class-level observables is not supported (this would be'
                 f' redundant). Instead use the "class_uid" attribute for querying, correlating, and'
                 f' reporting.')
 
-        if not is_patch and _is_hidden_class(cls_key, cls):
+        if not is_patch and is_hidden_class(cls_name, cls):
             attributes = cls.setdefault("attributes", {})
             for attribute in attributes.values():
                 if "observable" in attribute:
                     raise SchemaException(
                         f'Illegal definition of one or more attributes with "observable" definition in'
-                        f' {context} hidden class "{cls_key}". This would cause colliding definitions'
+                        f' {context} hidden class "{cls_name}". This would cause colliding definitions'
                         f' of the same observable type_id values in all children of this class. Instead,'
-                        f' define observables (of any kind) in non-hidden child classes of "{cls_key}".')
+                        f' define observables (of any kind) in non-hidden child classes of "{cls_name}".')
 
             if "observables" in cls:
                 raise SchemaException(
-                    f'Illegal "observables" definition in {context} hidden class "{cls_key}".'
+                    f'Illegal "observables" definition in {context} hidden class "{cls_name}".'
                     f' This would cause colliding definitions of the same observable type_id values in'
                     f' all children of this class. Instead, define observables (of any kind) in'
-                    f' non-hidden child classes of "{cls_key}".')
+                    f' non-hidden child classes of "{cls_name}".')
 
     def _observables_from_objects(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
-        for obj_key, obj in self._objects.items():
+        for obj_name, obj in self._objects.items():
             context = "base schema"
-            self._validate_object_observables(obj_key, obj, "base schema", is_patch=False)
-            self._observables_from_object(obj_key, obj, context)
-            self._observables_from_item_attributes(self._objects, obj_key, obj, "Object", is_patch=False)
+            self._validate_object_observables(obj_name, obj, "base schema", is_patch=False)
+            self._observables_from_object(obj_name, obj, context)
+            self._observables_from_item_attributes(self._objects, obj_name, obj, "Object", is_patch=False)
             # Not supported:
-            # self._observables_from_item_observables(self._objects, obj_key, obj, "Object", is_patch=False)
+            # self._observables_from_item_observables(self._objects, obj_name, obj, "Object", is_patch=False)
 
-        for patch_key, patch_list in self._object_patches.items():
+        for patch_name, patch_list in self._object_patches.items():
             for patch in patch_list:
                 context = f'"{patch["extension"]}" extension patch'
-                self._validate_object_observables(patch_key, patch, context, is_patch=True)
-                self._observables_from_object(patch_key, patch, context)
-                self._observables_from_item_attributes(self._objects, patch_key, patch, "Object", is_patch=True)
+                self._validate_object_observables(patch_name, patch, context, is_patch=True)
+                self._observables_from_object(patch_name, patch, context)
+                self._observables_from_item_attributes(self._objects, patch_name, patch, "Object", is_patch=True)
                 # Not supported:
-                # self._observables_from_item_observables(self._objects, patch_key, patch, "Object", is_patch=True)
+                # self._observables_from_item_observables(self._objects, patch_name, patch, "Object", is_patch=True)
 
     @staticmethod
-    def _validate_object_observables(obj_key: str, obj: JObject, context: str, is_patch: bool) -> None:
+    def _validate_object_observables(obj_name: str, obj: JObject, context: str, is_patch: bool) -> None:
         if "observables" in obj:
             # Attribute-path observables would be tricky to implement as an machine-driven enrichment.
             # It would require tracking the relative from the point of the object down that tree of an
             # overall OCSF event.
             raise SchemaException(
-                f'Illegal "observables" definition in {context} object "{obj_key}".'
+                f'Illegal "observables" definition in {context} object "{obj_name}".'
                 f' Object-specific attribute path observables are not supported.'
                 f' Please file an issue if you find this feature necessary.')
 
-        if not is_patch and _is_hidden_object(obj_key):
+        if not is_patch and is_hidden_object(obj_name):
             attributes = obj.setdefault("attributes", {})
             for attribute_detail in attributes.values():
                 if "observable" in attribute_detail:
                     raise SchemaException(
                         f'Illegal definition of one or more attributes with "observable" definition in'
-                        f' {context} hidden object "{obj_key}". This would cause colliding definitions'
+                        f' {context} hidden object "{obj_name}". This would cause colliding definitions'
                         f' of the same observable type_id values in all children of this object. Instead,'
-                        f' define observables (of any kind) in non-hidden child objects of "{obj_key}".')
+                        f' define observables (of any kind) in non-hidden child objects of "{obj_name}".')
 
             if "observable" in obj:
                 raise SchemaException(
-                    f'Illegal "observable" definition in {context} hidden object "{obj_key}".'
+                    f'Illegal "observable" definition in {context} hidden object "{obj_name}".'
                     f' This would cause colliding definitions of the same observable type_id values in'
                     f' all children of this object. Instead, define observables (of any kind) in'
-                    f' non-hidden child objects of "{obj_key}".')
+                    f' non-hidden child objects of "{obj_name}".')
 
-    def _observables_from_object(self, obj_key: str, obj: JObject, context: str) -> None:
-        caption = self._find_item_caption(self._objects, obj_key, obj)
+    def _observables_from_object(self, obj_name: str, obj: JObject, context: str) -> None:
+        caption = self._find_item_caption(self._objects, obj_name, obj)
         if "observable" in obj:
             observable_type_id = str(obj["observable"])
 
@@ -799,39 +855,39 @@ class SchemaCompiler:
     def _observables_from_item_attributes(
         self,
         items: JObject,
-        item_key: str,
+        item_name: str,
         item: JObject,
         kind: str,  # title-case kind; should be "Class" or "Object"
         is_patch: bool,
     ) -> None:
         if is_patch:
-            caption = self._find_parent_item_caption(items, item_key, item)
+            caption = self._find_parent_item_caption(items, item_name, item)
         else:
-            caption = self._find_item_caption(items, item_key, item)
-        for attribute_key, attribute in item.setdefault("attributes", {}).items():
+            caption = self._find_item_caption(items, item_name, item)
+        for attribute_name, attribute in item.setdefault("attributes", {}).items():
             if "observable" in attribute:
                 observable_type_id = str(attribute["observable"])
 
                 if observable_type_id in self._observable_type_id_dict:
                     raise SchemaException(
                         f'Collision of observable type_id {observable_type_id} between'
-                        f' "{caption}" {kind} attribute "{attribute_key}" and'
+                        f' "{caption}" {kind} attribute "{attribute_name}" and'
                         f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
 
                 self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
-                    f"{caption} {kind}: {attribute_key}",
-                    f'{kind}-specific attribute "{attribute_key}" for the {caption} {kind}.',
+                    f"{caption} {kind}: {attribute_name}",
+                    f'{kind}-specific attribute "{attribute_name}" for the {caption} {kind}.',
                     f"{kind}-Specific Attribute")
 
     def _observables_from_item_observables(
-        self, items: JObject, item_key: str, item: JObject, kind: str, is_patch: bool
+        self, items: JObject, item_name: str, item: JObject, kind: str, is_patch: bool
     ) -> None:
         # kind should be title-case: "Class" or "Object"
         if "observables" in item:
             if is_patch:
-                caption = self._find_parent_item_caption(items, item_key, item)
+                caption = self._find_parent_item_caption(items, item_name, item)
             else:
-                caption = self._find_item_caption(items, item_key, item)
+                caption = self._find_item_caption(items, item_name, item)
             for attribute_path, observable_type_id_num in item["observables"].items():
                 observable_type_id = str(observable_type_id_num)
                 if observable_type_id in self._observable_type_id_dict:
@@ -854,40 +910,40 @@ class SchemaCompiler:
         }
 
     @staticmethod
-    def _find_item_caption(items: JObject, item_key: str, item: JObject) -> str:
+    def _find_item_caption(items: JObject, item_name: str, item: JObject) -> str:
         if "caption" in item:
             return item["caption"]
-        return SchemaCompiler._find_parent_item_caption(items, item_key, item)
+        return SchemaCompiler._find_parent_item_caption(items, item_name, item)
 
     @staticmethod
-    def _find_parent_item_caption(items: JObject, item_key: str, item: JObject) -> str:
+    def _find_parent_item_caption(items: JObject, item_name: str, item: JObject) -> str:
         current_item = item
         while True:
             if "extends" in item:
-                parent_key = current_item["extends"]
-                if parent_key in items:
-                    parent_item = items[parent_key]
+                parent_name = current_item["extends"]
+                if parent_name in items:
+                    parent_item = items[parent_name]
                     if "caption" in parent_item:
                         return parent_item["caption"]
                     current_item = parent_item
                 else:
-                    raise SchemaException(f'Ancestor "{parent_key}" of "{item_key}" is undefined.')
+                    raise SchemaException(f'Ancestor "{parent_name}" of "{item_name}" is undefined.')
             else:
                 break
-        return item_key  # fallback
+        return item_name  # fallback
 
     @staticmethod
     def _resolve_patches(items: JObject, patches: PatchDict, kind: str) -> None:
-        for patch_key, patch_list in patches.items():
+        for patch_name, patch_list in patches.items():
             for patch in patch_list:
-                base_key = patch["extends"]  # this will be the same as patch_name
-                assert patch_key == base_key, "Patch name should match extends base name"
+                base_name = patch["extends"]  # this will be the same as patch_name
+                assert patch_name == base_name, "Patch name should match extends base name"
                 extension_name = patch.get("extension", "<unknown>")
-                logger.info('"%s" %s from "%s" extension is patching "%s"', patch_key, kind, extension_name, base_key)
-                if base_key not in items:
-                    raise SchemaException(f'"{patch_key}" {kind} from "{extension_name}" extension'
-                                          f' is attempting to patch undefined {kind} "{base_key}"')
-                base = items[base_key]
+                logger.info('"%s" %s from "%s" extension is patching "%s"', patch_name, kind, extension_name, base_name)
+                if base_name not in items:
+                    raise SchemaException(f'"{patch_name}" {kind} from "{extension_name}" extension'
+                                          f' is attempting to patch undefined {kind} "{base_name}"')
+                base = items[base_name]
                 SchemaCompiler._merge_profiles(base, patch)
                 deep_merge(base.setdefault("attributes", {}), patch.setdefault("attributes", {}))
                 # Top-level observable.
@@ -922,22 +978,22 @@ class SchemaCompiler:
 
     @staticmethod
     def _resolve_extends(items: JObject, kind: str) -> None:
-        for item_key, item in items.items():
-            SchemaCompiler._resolve_item_extends(items, item_key, item, kind)
+        for item_name, item in items.items():
+            SchemaCompiler._resolve_item_extends(items, item_name, item, kind)
 
     @staticmethod
-    def _resolve_item_extends(items: JObject, item_key: str, item: JObject, kind: str) -> None:
-        if item_key is None or item is None:
+    def _resolve_item_extends(items: JObject, item_name: str, item: JObject, kind: str) -> None:
+        if item_name is None or item is None:
             return
 
-        parent_key = item.get("extends")
-        SchemaCompiler._resolve_item_extends(items, parent_key, items.get(parent_key), kind)
-        assert parent_key == item.get("extends"), (f'{kind} "{item_key}" "extends" value should not change after'
-                                                   f' recursively processing parent: original value: "{parent_key}",'
-                                                   f' current value: "{item.get("extends")}"')
+        parent_name = item.get("extends")
+        SchemaCompiler._resolve_item_extends(items, parent_name, items.get(parent_name), kind)
+        assert parent_name == item.get("extends"), (f'{kind} "{item_name}" "extends" value should not change after'
+                                                    f' recursively processing parent: original value: "{parent_name}",'
+                                                    f' current value: "{item.get("extends")}"')
 
-        if parent_key:
-            parent_item = items.get(parent_key)
+        if parent_name:
+            parent_item = items.get(parent_name)
             if parent_item:
                 # Create flattened item by merging item on top of a copy of it's parent with the result
                 # that new and overlapping things in item "win" over those in parent.
@@ -953,7 +1009,7 @@ class SchemaCompiler:
                         #       After everything is working, try removing.
                         for k, v in new_attributes.items():
                             if v is None:
-                                logger.debug('Attribute "%s" is None in %s "%s"', k, kind, item_key)
+                                logger.debug('Attribute "%s" is None in %s "%s"', k, kind, item_name)
                         new_attributes = dict((k, v) for k, v in new_attributes.items() if v is not None)
                         new_item["attributes"] = new_attributes
                     elif source_key == "profiles":
@@ -965,19 +1021,19 @@ class SchemaCompiler:
                         if source_value is not None:
                             new_item[source_key] = source_value
                         else:
-                            logger.debug('Not merging null value of key "%s" in %s "%s"', source_key, kind, item_key)
-                items[item_key] = new_item
+                            logger.debug('Not merging null value of key "%s" in %s "%s"', source_key, kind, item_name)
+                items[item_name] = new_item
             else:
                 raise SchemaException(f'{kind} "{item.get("name", "<unknown>")}"'
-                                      f' extends undefined {kind} "{parent_key}"')
+                                      f' extends undefined {kind} "{parent_name}"')
 
     def _enrich_and_validate_dictionary(self):
-        self._add_common_dictionary_attribute_links()
-        self._add_class_dictionary_attribute_links()
-        self._add_object_dictionary_attribute_links()
+        if self.include_browser_data:
+            self._add_common_dictionary_attribute_links()
+            self._add_class_dictionary_attribute_links()
+            self._add_object_dictionary_attribute_links()
         self._enrich_and_validate_dictionary_attribute_types()
         self._add_datetime_sibling_dictionary_attributes()
-        pass
 
     @staticmethod
     def _make_link(group: str, item_name: str, item: JObject) -> JObject:
@@ -990,27 +1046,27 @@ class SchemaCompiler:
             "type": item_name,
             "caption": item.get("caption", "*No name*")
         }
-        if "@deprecated" in item:
-            link["@deprecated"] = True
+        if item.get("@deprecated"):
+            link["deprecated?"] = True
         return link
 
     def _add_link_to_dictionary_attributes(self, kind: str, item_name: str, item: JObject, link: JObject) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         item_attributes = item.setdefault("attributes", {})
-        for item_attribute_key, item_attribute in item_attributes.items():
+        for item_attribute_name, item_attribute in item_attributes.items():
             enriched_link = deepcopy(link)
             # TODO: Are "attribute_keys" used for all types or only object types? (Seems like only object types.)
             #       Once everything is working, try only setting "attribute_keys" for object types.
-            enriched_link["attribute_keys"] = [item_attribute_key]
+            enriched_link["attribute_keys"] = [item_attribute_name]
             # TODO: Do we need to do special extension processing from Utils.update_attributes?
             #       It looks like this was a hack to avoid defining extension attributes in its dictionary.
             #       That code is NOT replicated here.
-            if item_attribute_key in dictionary_attributes:
-                dictionary_attribute = dictionary_attributes[item_attribute_key]
+            if item_attribute_name in dictionary_attributes:
+                dictionary_attribute = dictionary_attributes[item_attribute_name]
                 links = dictionary_attribute.setdefault("_links", [])
                 links.append(enriched_link)
             else:
-                raise SchemaException(f'{kind} "{item_name}" uses undefined attribute "{item_attribute_key}"')
+                raise SchemaException(f'{kind} "{item_name}" uses undefined attribute "{item_attribute_name}"')
 
     def _add_common_dictionary_attribute_links(self):
         if "base_event" not in self._classes:
@@ -1033,12 +1089,12 @@ class SchemaCompiler:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         dictionary_types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
 
-        for attribute_key, attribute in dictionary_attributes.items():
+        for attribute_name, attribute in dictionary_attributes.items():
             if "type" in attribute:
                 attribute_type = attribute["type"]
             else:
                 raise SchemaException(f'Dictionary attribute'
-                                      f' {self._name_with_possible_extension(attribute_key, attribute)}'
+                                      f' {self._name_with_possible_extension(attribute_name, attribute)}'
                                       f' does not define "type"')
 
             if attribute_type == "object_t":
@@ -1054,7 +1110,7 @@ class SchemaCompiler:
                     obj["object_name"] = obj.get("caption", "")
                 else:
                     raise SchemaException(
-                        f'Undefined object type in dictionary attribute "{attribute_key}": "{object_type}"')
+                        f'Undefined object type in dictionary attribute "{attribute_name}": "{object_type}"')
             else:
                 # Normal dictionary type
                 if attribute_type in dictionary_types:
@@ -1066,7 +1122,7 @@ class SchemaCompiler:
                                               f' does not define "caption"')
                 else:
                     raise SchemaException(f'Dictionary attribute'
-                                          f' {self._name_with_possible_extension(attribute_key, attribute)}'
+                                          f' {self._name_with_possible_extension(attribute_name, attribute)}'
                                           f' has undefined "type" of "{attribute_type}"')
 
     @staticmethod
@@ -1083,158 +1139,129 @@ class SchemaCompiler:
         got_datetime_profile = "datetime" in self._profiles
         got_datetime_t = "datetime_t" in self._dictionary.setdefault("types", {}).setdefault("attributes", {})
         if got_datetime_profile and got_datetime_t:
+            logger.info('This schema defines the "datetime" profile and the "datetime_t" dictionary type,'
+                        ' so datetime siblings of timestamp_t attributes will be added.')
             # Add datetime siblings
             dictionary_attributes = self._dictionary.setdefault("attributes", {})
             # We can't add dictionary_attributes while iterator, so instead add to another dict and then merge
             additions = {}
-            for attribute_key, attribute in dictionary_attributes.items():
+            for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("type") == "timestamp_t":
                     sibling = deepcopy(attribute)
+                    # TODO: fix up attribute_keys in _links if they are actually used
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
-                    additions[self._make_datetime_attribute_name(attribute_key)] = sibling
+                    sibling["profile"] = "datetime"
+                    additions[self._make_datetime_attribute_name(attribute_name)] = sibling
             dictionary_attributes.update(additions)
         elif got_datetime_profile:
             raise SchemaException('Schema defines "datetime" profile but does not define "datetime_t" dictionary type')
         elif got_datetime_t:
             raise SchemaException('Schema defines "datetime_t" dictionary type but does not define "datetime" profile')
         else:
-            logger.info('This schema does not define the "datetime" profile and "datetime_t" dictionary type,'
+            logger.info('This schema does not define the "datetime" profile or the "datetime_t" dictionary type,'
                         ' so datetime siblings of timestamp_t attributes will not be added.')
 
     @staticmethod
     def _make_datetime_attribute_name(timestamp_name: str) -> str:
         return f'{timestamp_name}_dt'
 
-def _read_json_object_file(path: Path) -> JObject:
-    with open(path) as f:
-        v = json.load(f)
-        if not isinstance(v, dict):
-            t = json_type_from_value(v)
-            raise TypeError(f"Schema file contains a JSON {t} value, but should contain an object: {path}")
-        return v
+    def _observables_from_dictionary(self) -> None:
+        types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
+        attributes = self._dictionary.setdefault("attributes", {})
+        self._observables_from_dictionary_items(types, "Dictionary Type")
+        self._observables_from_dictionary_items(attributes, "Dictionary Attribute")
 
-
-def _read_structured_items(
-    base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
-) -> JObject:
-    """
-    Read schema structured items found in `kind` directory under `base_path`, recursively, and returns dict with
-    unprocessed items, each keyed by their name attribute.
-    """
-    # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
-    item_path = base_path / kind
-    items = {}
-    for dir_path, dir_names, file_names in os.walk(item_path, topdown=False):
-        for file_name in file_names:
-            if file_name.endswith(".json"):
-                file_path = Path(dir_path, file_name)
-                obj = _read_json_object_file(file_path)
-                name = obj.get("name")
-
-                # The way this is tested, "no value" happens when attribute is missing, JSON null (Python None),
-                # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
-                if not name:
-                    raise SchemaException(f'The "name" value in {kind} file must have a value: {file_path}')
-
-                # Ensure name is a string
-                if not isinstance(name, str):
-                    raise SchemaException(f'The "name" value in {kind} file must be a string,'
-                                          f' but got {json_type_from_value(name)}: {file_path}')
-
-                if name in items:
-                    existing = items[name]
-                    raise SchemaException(f'Collision of "name" in {kind} file: "{name}" with caption'
-                                          f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                                          f' "{existing.get("caption", "")}",'
-                                          f' file: {file_path}')
+    def _observables_from_dictionary_items(self, items: JObject, kind: str) -> None:
+        for key, detail in items.items():
+            if "observable" in detail:
+                observable_type_id = str(detail["observable"])
+                if observable_type_id in self._observable_type_id_dict:
+                    entry = self._observable_type_id_dict[observable_type_id]
+                    raise SchemaException(f'Collision of observable type_id {observable_type_id} between {kind}'
+                                          f' "{key}" with caption "{detail.get("caption")}"'
+                                          f' and {kind} with caption "{entry["caption"]}"')
                 else:
-                    items[name] = obj
-                    if item_callback_fn:
-                        item_callback_fn(file_path, obj)
+                    entry = self._make_observable_enum_entry(
+                        detail.get("caption", ""), detail.get("description", ""), kind)
+                    self._observable_type_id_dict[observable_type_id] = entry
 
-    return items
-
-
-def _read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObject, JObject]:
-    """
-    Read schema "patchable" structured items found in `kind` directory under `base_path`, recursively, and returns
-    dataclass with unprocessed items and patches. Extension classes and objects are patchable structured items. Items
-    are each keyed by their name attribute and patches are keyed by the name of the item to patch.
-
-    Returns tuple of items dictionary and patches dictionary.
-    """
-    # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
-    item_path = base_path / kind
-    items = {}
-    patches = {}
-    for dir_path, dir_names, file_names in os.walk(item_path, topdown=False):
-        for file_name in file_names:
-            if file_name.endswith(".json"):
-                file_path = Path(dir_path, file_name)
-                obj = _read_json_object_file(file_path)
-                # An extension "patch" occurs in two cases:
-                #   1. The item has an "extends" key but no "name" key. This is the common case in practice.
-                #   2. The item has both the "name" and "extends" keys, and both have the same value.
-                name = obj.get("name")
-                extends = obj.get("extends")
-
-                # A structured item (a class, object, etc.) must have a name OR an extends value
-                # The way this is tested, "no value" happens when attribute is missing, JSON null (Python None),
-                # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
-                if not name and not extends:
-                    raise SchemaException(
-                        f'Extension {kind} file does not have a "name" or "extends" value: {file_path}')
-
-                # Ensure values are strings
-                if name and not isinstance(name, str):
-                    raise SchemaException(f'The "name" value in extension {kind} file must be a string,'
-                                          f' but got {json_type_from_value(name)}: {file_path}')
-                if extends and not isinstance(extends, str):
-                    raise SchemaException(f'The "extends" value in extension {kind} file must be a string,'
-                                          f' but got {json_type_from_value(extends)}: {file_path}')
-
-                if not name or name == extends:
-                    # This is a patch definition.
-                    # An extension event class or object is a patch when it only defines "extends"
-                    # or (weirdly) when "name" and "extends" have the same value. This second case is not used
-                    # by any version of schema on https://github.com/ocsf/ocsf-schema or the Splunk extension at
-                    # https://github.com/ocsf/splunk, but has always been possible and we need to support it.
-                    patch_key = extends  # for clarity
-                    if patch_key in patches:
-                        existing = patches[patch_key]
-                        raise SchemaException(f'Collision of patch name ("extends" key) in extension {kind} file:'
-                                              f' "{patch_key}" with caption "{obj.get("caption", "")}", collides with'
-                                              f' existing {kind} with caption "{existing.get("caption", "")}",'
-                                              f' file: {file_path}')
-                    else:
-                        patches[patch_key] = obj
+    def _enrich_profiles_attributes_from_dictionary(self):
+        dictionary_attributes = self._dictionary.setdefault("attributes", {})
+        for profile_name, profile in self._profiles.items():
+            for profile_attribute_name, profile_attribute in profile.setdefault("attributes", {}).items():
+                if profile_attribute_name in dictionary_attributes:
+                    dictionary_attribute = dictionary_attributes[profile_attribute_name]
+                    for key in ["caption", "description", "is_array", "enum", "type", "type_name",
+                                "object_name", "object_type", "observable", "source", "references", "sibling",
+                                "@deprecated"]:
+                        value = dictionary_attribute.get(key)
+                        if value is not None and key not in profile_attribute:
+                            profile_attribute[key] = value
+                    # TODO: This "profile" key is added in self._enrich_profiles then removed here. Why bother?
+                    del profile_attribute["profile"]
                 else:
-                    # This is a normal definition.
-                    if name in items:
-                        existing = items[name]
-                        raise SchemaException(f'Collision of "name" in extension {kind} file: "{name}" with caption'
-                                              f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                                              f' "{existing.get("caption", "")}", file: {file_path}')
+                    # TODO: This is an actual error that the Elixir compile hid via a weird hack.
+                    #       The "splunk" extension has several instances of this problem.
+                    #       These errors must either be fixed, or this compile needs to replicate the hack from Elixir.
+                    if "extension" in profile:
+                        description = f'"{profile_name}" from extension "{profile["extension"]}"'
                     else:
-                        items[name] = obj
+                        description = f'"{profile_name}"'
+                    self._tolerable_error(SchemaException(f'Profile {description}'
+                                                          f' uses undefined dictionary attribute "{profile_attribute_name}"'))
 
-    return items, patches
+    def _validate_profiles_and_add_item_links(self, group: str, items: JObject) -> None:
+        for item_name, item in items.items():
+            if "profiles" in item:
+                for profile_name in item["profiles"]:
+                    if profile_name in self._profiles:
+                        profile = self._profiles[profile_name]
+                        if "extension" in profile:
+                            self._warning('Profile "%s" from extension "%s" used without scope in %s "%s"'
+                                          ' (got "%s", expected "%s/%s")',
+                                          profile_name, profile["extension"], group, item_name,
+                                          profile_name, profile["extension"], profile_name)
+                    elif profile_name in self._extension_scoped_profiles:
+                        profile = self._extension_scoped_profiles[profile_name]
+                    else:
+                        if "extension" in item:
+                            description = f'extension "{item["extension"]}" {group} "{item_name}"'
+                        else:
+                            description = f'{group} "{item_name}"'
+                        raise SchemaException(f'{description} uses undefined profile "{profile_name}"')
 
+                    if self.include_browser_data:
+                        # The "_link" attribute is only used by the browser
+                        link = self._make_link(group, item_name, item)
+                        links = profile.get("_links", [])
+                        links.append(link)
 
-def _is_hidden_class(cls_key: str, cls: JObject) -> bool:
-    return cls_key != "base_event" and "uid" not in cls
+    def _add_object_links(self):
+        if not self.include_browser_data:
+            # The "_link" attribute is only used by the browser
+            return
 
+        dictionary_attributes = self._dictionary.setdefault("attributes", {})
+        for obj_name, obj in self._objects.items():
+            links = []
+            for attribute_name, attribute in dictionary_attributes.items():
+                if attribute.get("object_type") == obj_name and "_links" in attribute:
+                    if "_links" in attribute:
+                        links.extend(deepcopy(attribute["_links"]))
 
-def _is_hidden_object(obj_key: str) -> bool:
-    return obj_key.startswith("_")
+            # Group by group and type and merge attribute_keys
+            grouped_links = {}
+            for link in links:
+                group_key = f"{link["group"]}:{link["type"]}"
+                if group_key in grouped_links:
+                    group = grouped_links[group_key]
+                    group_attribute_keys = group["attribute_keys"]
+                    for key in link["attribute_keys"]:
+                        if key not in group_attribute_keys:
+                            group_attribute_keys.append(key)
+                else:
+                    grouped_links[group_key] = link
 
-
-def schema_compile(
-    schema_path: Path,
-    ignore_platform_extensions: bool,
-    extensions_paths: list[Path],
-    include_browser_data: bool,
-) -> Schema:
-    schema_compiler = SchemaCompiler(schema_path, ignore_platform_extensions, extensions_paths, include_browser_data)
-    return schema_compiler.compile()
+            # final result is the values of the grouped_link dict
+            obj["_links"] = list(grouped_links.values())
