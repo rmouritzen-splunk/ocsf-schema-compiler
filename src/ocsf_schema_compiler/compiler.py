@@ -26,6 +26,7 @@ class Schema:
     objects: JObject
     dictionary: JObject  # needed for browser UI
     profiles: JObject  # needed for browser UI
+    extensions: JObject  # needed for browser UI
 
 
 @dataclass
@@ -110,24 +111,12 @@ class SchemaCompiler:
 
         logger.info("Compiling schema")
 
-        if self.schema_path.is_dir():
-            pass
-        else:
+        if not self.schema_path.is_dir():
             raise FileNotFoundError(f"Schema path does not exist: {self.schema_path}")
 
         self._read_base_schema()
-        extensions = self._read_all_extensions()
-
         self._resolve_includes()
-        self._resolve_extension_includes(extensions)
-
-        self._merge_categories_from_extensions(extensions)
-        self._merge_classes_from_extensions(extensions)
-        self._merge_objects_from_extensions(extensions)
-        self._merge_dictionary_from_extensions(extensions)
-        self._merge_profiles_from_extensions(extensions)
-
-        self._consolidate_extension_patches(extensions)
+        extensions = self._read_and_merge_extensions()
 
         self._enrich_dictionary_object_types()
 
@@ -138,26 +127,29 @@ class SchemaCompiler:
         self._observables_from_dictionary()
 
         self._enrich_profiles_attributes_from_dictionary()
-        self._validate_profiles_and_add_item_links("object", self._objects)
-
+        self._validate_object_profiles_and_add_links()
         self._add_object_links()
-        # TODO: More objects processing: Cache.update_observable
-        # TODO: More objects processing: Cache.update_objects
-        # TODO: More objects processing: Cache.final_check
+        self._update_observable_enum()
+        self._update_linked_object_profiles()
+        self._verify_object_attributes_and_add_datetime()
 
-        # TODO: Profiles.sanity_check classes
-        self._validate_profiles_and_add_item_links("class", self._classes)
+        self._validate_class_profiles_and_add_links()
+        self._update_linked_class_profiles()
+        self._verify_class_attributes_and_add_datetime()
 
-        # TODO: More classes processing: Cache.update_classes
-        # TODO: More classes processing: Cache.final_check
         # TODO: Extract and further process base_event: Cache.final_check
         #       NOTE: This doesn't seem necessary since in Python we are updating in-place.
+
         # TODO: Fix entities (fix up / track missing attribute "requirement" values)
         #
-        # TODO: enrich classes and objects with dictionary attribute information
+
+        # TODO: enrich classes and objects with dictionary attribute information?
         #       See: Cache.export_classes, Cache.export_objects
         #       NOTE: This is different from how the OCSF Server works. Let's try it and strip out the enrich magic
         #             from the server.
+
+        # TODO: Strip browser-specific keys when self.include_browser_data is False
+        #       (The "_links" attribute, at least, is used for main processing so cannot simply be not added.)
         #
         # TODO: Profit!
 
@@ -184,8 +176,8 @@ class SchemaCompiler:
             classes=self._classes,
             objects=self._objects,
             dictionary=self._dictionary,
-            profiles=self._profiles,  # TODO: change to profiles information
-            # TODO: add extensions information
+            profiles=self._profiles,
+            extensions=extensions,
         )
 
     def _tolerable_error(self, exception: SchemaException) -> None:
@@ -206,7 +198,7 @@ class SchemaCompiler:
         self._warning_count += 1
         logger.warning(message, *args, **kwargs)
 
-    def _read_base_schema(self):
+    def _read_base_schema(self) -> None:
         self._read_version()
         self._categories = read_json_object_file(self.schema_path / "categories.json")
         self._dictionary = read_json_object_file(self.schema_path / "dictionary.json")
@@ -224,6 +216,28 @@ class SchemaCompiler:
                 f"Schema version file does not exist (is this a schema directory?): {version_path}") from e
         except KeyError as e:
             raise SchemaException(f'The "version" key is missing in the schema version file: {version_path}') from e
+
+    def _read_and_merge_extensions(self) -> JObject:
+        extensions: list[Extension] = self._read_all_extensions()
+        self._resolve_extension_includes(extensions)
+        self._merge_categories_from_extensions(extensions)
+        self._merge_classes_from_extensions(extensions)
+        self._merge_objects_from_extensions(extensions)
+        self._merge_dictionary_from_extensions(extensions)
+        self._merge_profiles_from_extensions(extensions)
+        self._consolidate_extension_patches(extensions)
+
+        extension_dict: JObject = {}
+        for extension in extensions:
+            extension_dict[extension.name] = {
+                "uid": extension.uid,
+                "name": extension.name,
+                "platform_extension?": extension.is_platform_extension,
+                "caption": extension.caption,
+                "description": extension.description,
+                "version": extension.version,
+            }
+        return extension_dict
 
     def _read_all_extensions(self) -> list[Extension]:
         extensions: list[Extension] = []
@@ -534,7 +548,8 @@ class SchemaCompiler:
         attribute_name: str,
         attribute: JObject,
         context: str,
-        include_path: Path) -> None:
+        include_path: Path
+    ) -> None:
         include_item = self._get_include_contents(context, include_path)
 
         # Create new attribute_detail for attributes.{attribute_name}, starting with included_item
@@ -604,8 +619,7 @@ class SchemaCompiler:
                         self._extension_scoped_profiles[scoped_name] = profile
 
     @staticmethod
-    def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str
-                               ) -> None:
+    def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str) -> None:
         for ext_item_name, ext_item in extension_items.items():
             if ext_item_name in items:
                 item = items[ext_item_name]
@@ -694,7 +708,7 @@ class SchemaCompiler:
                 "caption": f"{cls_caption}: Unknown",
             }
             type_uid_attribute["enum"] = type_uid_enum
-            # TODO: Only add when self.include_browser_data is True?
+            # TODO: Only add "_source" when self.include_browser_data is True
             type_uid_attribute["_source"] = cls_name
 
             # add class_uid and class_name attributes
@@ -703,7 +717,7 @@ class SchemaCompiler:
             cls_uid_key = str(cls_uid)
             enum = {cls_uid_key: {"caption": cls_caption, "description": cls.get("description", "")}}
             cls_uid_attribute["enum"] = enum
-            # TODO: Only add when self.include_browser_data is True?
+            # TODO: Only add "_source" when self.include_browser_data is True
             cls_uid_attribute["_source"] = cls_name
             cls_name_attribute["description"] = (f"The event class name,"
                                                  f" as defined by class_uid value: <code>{cls_caption}</code>.")
@@ -903,6 +917,7 @@ class SchemaCompiler:
 
     @staticmethod
     def _make_observable_enum_entry(caption: str, description: str, observable_kind: str) -> JObject:
+        # TODO: Only add _observable_kind" when self.include_browser_data is True
         return {
             "caption": caption,
             "description": f"Observable by {observable_kind}.<br>{description}",
@@ -1027,11 +1042,10 @@ class SchemaCompiler:
                 raise SchemaException(f'{kind} "{item.get("name", "<unknown>")}"'
                                       f' extends undefined {kind} "{parent_name}"')
 
-    def _enrich_and_validate_dictionary(self):
-        if self.include_browser_data:
-            self._add_common_dictionary_attribute_links()
-            self._add_class_dictionary_attribute_links()
-            self._add_object_dictionary_attribute_links()
+    def _enrich_and_validate_dictionary(self) -> None:
+        self._add_common_dictionary_attribute_links()
+        self._add_class_dictionary_attribute_links()
+        self._add_object_dictionary_attribute_links()
         self._enrich_and_validate_dictionary_attribute_types()
         self._add_datetime_sibling_dictionary_attributes()
 
@@ -1068,24 +1082,24 @@ class SchemaCompiler:
             else:
                 raise SchemaException(f'{kind} "{item_name}" uses undefined attribute "{item_attribute_name}"')
 
-    def _add_common_dictionary_attribute_links(self):
+    def _add_common_dictionary_attribute_links(self) -> None:
         if "base_event" not in self._classes:
             raise SchemaException('Schema has not defined a "base_event" class')
         base_event = self._classes["base_event"]
         link = self._make_link("common", "base_event", base_event)
         self._add_link_to_dictionary_attributes("class", "base_event", base_event, link)
 
-    def _add_class_dictionary_attribute_links(self):
+    def _add_class_dictionary_attribute_links(self) -> None:
         for cls_name, cls in self._classes.items():
             link = self._make_link("class", cls_name, cls)
             self._add_link_to_dictionary_attributes("class", cls_name, cls, link)
 
-    def _add_object_dictionary_attribute_links(self):
+    def _add_object_dictionary_attribute_links(self) -> None:
         for obj_name, obj in self._objects.items():
             link = self._make_link("object", obj_name, obj)
             self._add_link_to_dictionary_attributes("object", obj_name, obj, link)
 
-    def _enrich_and_validate_dictionary_attribute_types(self):
+    def _enrich_and_validate_dictionary_attribute_types(self) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         dictionary_types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
 
@@ -1186,7 +1200,7 @@ class SchemaCompiler:
                         detail.get("caption", ""), detail.get("description", ""), kind)
                     self._observable_type_id_dict[observable_type_id] = entry
 
-    def _enrich_profiles_attributes_from_dictionary(self):
+    def _enrich_profiles_attributes_from_dictionary(self) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         for profile_name, profile in self._profiles.items():
             for profile_attribute_name, profile_attribute in profile.setdefault("attributes", {}).items():
@@ -1211,7 +1225,13 @@ class SchemaCompiler:
                     self._tolerable_error(SchemaException(f'Profile {description}'
                                                           f' uses undefined dictionary attribute "{profile_attribute_name}"'))
 
-    def _validate_profiles_and_add_item_links(self, group: str, items: JObject) -> None:
+    def _validate_object_profiles_and_add_links(self) -> None:
+        self._validate_profiles_and_add_links("object", self._objects)
+
+    def _validate_class_profiles_and_add_links(self) -> None:
+        self._validate_profiles_and_add_links("class", self._classes)
+
+    def _validate_profiles_and_add_links(self, group: str, items: JObject) -> None:
         for item_name, item in items.items():
             if "profiles" in item:
                 for profile_name in item["profiles"]:
@@ -1231,17 +1251,11 @@ class SchemaCompiler:
                             description = f'{group} "{item_name}"'
                         raise SchemaException(f'{description} uses undefined profile "{profile_name}"')
 
-                    if self.include_browser_data:
-                        # The "_link" attribute is only used by the browser
-                        link = self._make_link(group, item_name, item)
-                        links = profile.get("_links", [])
-                        links.append(link)
+                    link = self._make_link(group, item_name, item)
+                    links = profile.get("_links", [])
+                    links.append(link)
 
-    def _add_object_links(self):
-        if not self.include_browser_data:
-            # The "_link" attribute is only used by the browser
-            return
-
+    def _add_object_links(self) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         for obj_name, obj in self._objects.items():
             links = []
@@ -1265,3 +1279,79 @@ class SchemaCompiler:
 
             # final result is the values of the grouped_link dict
             obj["_links"] = list(grouped_links.values())
+
+    def _update_observable_enum(self) -> None:
+        if "observable" in self._objects:
+            observable = self._objects["observable"]
+            dest_enum_dict = observable.setdefault("attributes", {}).setdefault("type_id", {}).setdefault("enum", {})
+            for source_type_id_key, source_enum_detail in self._observable_type_id_dict.items():
+                if source_type_id_key in dest_enum_dict:
+                    raise SchemaException(f'Collision of observable type_id {source_type_id_key} between'
+                                          f' "{source_enum_detail.get("caption", "")}"'
+                                          f' and "{dest_enum_dict[source_type_id_key].get("caption", "")}"'
+                                          f' (detected during merge)')
+                else:
+                    dest_enum_dict[source_type_id_key] = source_enum_detail
+
+    def _update_linked_object_profiles(self) -> None:
+        self._update_linked_item_profiles("object", self._objects)
+
+    def _update_linked_class_profiles(self) -> None:
+        self._update_linked_item_profiles("class", self._classes)
+
+    @staticmethod
+    def _update_linked_item_profiles(group: str, items: JObject) -> None:
+        for from_item_name, from_item in items.items():
+            if "profiles" in from_item and "_links" in from_item:
+                # Merge this item's profiles in to all linked items in same group (object or class)
+                from_profiles = from_item["profiles"]
+                for from_link in from_item["_links"]:
+                    if from_link["group"] == group:
+                        to_item_name = from_link["type"]
+                        to_item = items[to_item_name]
+                        to_profiles = to_item.setdefault("profiles", [])
+                        for from_item_profile in from_profiles:
+                            if from_item_profile not in to_profiles:
+                                to_profiles.append(from_item_profile)
+
+    def _verify_object_attributes_and_add_datetime(self) -> None:
+        self._verify_item_attributes_and_add_datetime(self._objects, "object")
+
+    def _verify_class_attributes_and_add_datetime(self) -> None:
+        self._verify_item_attributes_and_add_datetime(self._classes, "class")
+
+    def _verify_item_attributes_and_add_datetime(self, items: JObject, kind: str) -> None:
+        dictionary_attributes = self._dictionary.setdefault("attributes", {})
+
+        got_datetime_profile = "datetime" in self._profiles
+        got_datetime_t = "datetime_t" in self._dictionary.setdefault("types", {}).setdefault("attributes", {})
+        add_datetime = got_datetime_profile and got_datetime_t
+
+        for item_name, item in items.items():
+            dt_attribute_additions: JObject = {} # we cannot add attributes while iterating attributes
+            attributes = item.setdefault("attributes", {})
+            for attribute_name, attribute in attributes.items():
+                dictionary_attribute = dictionary_attributes.get(attribute_name, {})
+                if "description" not in attribute:
+                    # No description. Make sure fallback dictionary description isn't meant to be overridden.
+                    dictionary_description = dictionary_attribute.get("description", "")
+                    if "See specific usage" in dictionary_description:
+                        self._warning('Please update the "description" of %s "%s" attribute "%s": "%s"',
+                                      kind, item_name, attribute_name, dictionary_description)
+
+                if add_datetime:
+                    if "type" in attribute:
+                        attribute_type = attribute["type"]
+                    else:
+                        attribute_type = dictionary_attribute.get("type")
+                    if attribute_type == "timestamp_t":
+                        dt_attribute = deepcopy(attribute)
+                        dt_attribute["profile"] = "datetime"
+                        dt_attribute["requirement"] = "optional"
+                        dt_attribute_additions[self._make_datetime_attribute_name(attribute_name)] = dt_attribute
+
+            if dt_attribute_additions:
+                attributes.update(dt_attribute_additions)
+                profiles = item.setdefault("profiles", [])
+                if "datetime" not in profiles:
+                    profiles.append("datetime")

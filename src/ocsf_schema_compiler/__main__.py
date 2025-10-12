@@ -68,7 +68,7 @@ def main():
     # TODO: debugging friendly version:
     # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))
-    print(json.dumps(schema.objects["policy"], cls=CustomEncoder, indent=2, sort_keys=True))
+    print(json.dumps(schema.objects["file"], cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
 
 
