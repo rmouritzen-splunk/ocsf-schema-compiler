@@ -11,4 +11,7 @@ clean:
 		-or -type f -name '*.py[cod]' -delete \
 		-or -type f -name '*$py.class' -delete
 
+cloc:
+	cloc --exclude-dir=.venv,.idea .
+
 .PHONY: init test

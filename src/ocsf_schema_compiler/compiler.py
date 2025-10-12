@@ -27,6 +27,7 @@ class Schema:
     dictionary: JObject  # needed for browser UI
     profiles: JObject  # needed for browser UI
     extensions: JObject  # needed for browser UI
+    # TODO: add all_classes and all_objects for browser UI
 
 
 @dataclass
@@ -49,7 +50,8 @@ class Extension:
 
 # Type alias for dictionary from patch item name to a list of patch objects.
 # The value is list since different extensions can patch the same thing.
-type PatchDict = dict[str, list[JObject]]
+type PatchList = list[JObject]  # list of patches for an item name
+type PatchDict = dict[str, PatchList]  # dict of item name to list of patches
 
 
 class SchemaCompiler:
@@ -137,19 +139,16 @@ class SchemaCompiler:
         self._update_linked_class_profiles()
         self._verify_class_attributes_and_add_datetime()
 
-        # TODO: Extract and further process base_event: Cache.final_check
-        #       NOTE: This doesn't seem necessary since in Python we are updating in-place.
-
-        # TODO: Fix entities (fix up / track missing attribute "requirement" values)
-        #
+        self._ensure_attributes_have_requirement()
 
         # TODO: enrich classes and objects with dictionary attribute information?
         #       See: Cache.export_classes, Cache.export_objects
         #       NOTE: This is different from how the OCSF Server works. Let's try it and strip out the enrich magic
         #             from the server.
-
-        # TODO: Strip browser-specific keys when self.include_browser_data is False
-        #       (The "_links" attribute, at least, is used for main processing so cannot simply be not added.)
+        #
+        # TODO: Strip browser-specific keys when self.include_browser_data is False.
+        # if not self.include_browser_data:
+        #     self.strip_browser_data()
         #
         # TODO: Profit!
 
@@ -159,7 +158,7 @@ class SchemaCompiler:
         # TODO: Support item attributes affected by more than one profile.
         #       Change attribute "profile", a string, to "profiles", an array of strings. At least in new output format.
         #       Legacy output format can continue with "profile" and use a a comma-separated string.
-        #
+        # TODO: Reevaluate uses of "_source" and "_source_patched". Some uses don't seem necessary.
 
         if self._error_count and self._warning_count:
             logger.error("Compile completed with %d error(s) and %d warning(s)", self._error_count, self._warning_count)
@@ -653,19 +652,23 @@ class SchemaCompiler:
 
     def _process_classes(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
-        # the observable type_id will be propagated to all children of an event class.
+        # the observable type_id enumerations will be propagated to all children of event classes.
         self._observables_from_classes()
 
+        self._add_source_to_item_attributes(self._classes, "class")
+        self._add_source_to_patch_item_attributes(self._class_patches, "class")
         self._resolve_patches(self._classes, self._class_patches, "class")
         self._resolve_extends(self._classes, "class")
 
         # Save informational complete class hierarchy (for schema browser)
-        # TODO: only do this when self.include_browser_data is True?
+        # TODO: only add _all_classes when self.include_browser_data is True?
         for cls_name, cls in self._classes.items():
             cls_slice = {}
             for k in ["name", "caption", "extends", "extension"]:
                 if k in cls:
                     cls_slice[k] = cls[k]
+            # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
+            #       The uses of "is_hidden" will need to be changed in the schema browser as well.
             cls_slice["is_hidden"] = is_hidden_class(cls_name, cls)
             self._all_classes[cls_name] = cls_slice
 
@@ -708,7 +711,7 @@ class SchemaCompiler:
                 "caption": f"{cls_caption}: Unknown",
             }
             type_uid_attribute["enum"] = type_uid_enum
-            # TODO: Only add "_source" when self.include_browser_data is True
+            # TODO: Only add "_source" when self.include_browser_data is True?
             type_uid_attribute["_source"] = cls_name
 
             # add class_uid and class_name attributes
@@ -717,7 +720,7 @@ class SchemaCompiler:
             cls_uid_key = str(cls_uid)
             enum = {cls_uid_key: {"caption": cls_caption, "description": cls.get("description", "")}}
             cls_uid_attribute["enum"] = enum
-            # TODO: Only add "_source" when self.include_browser_data is True
+            # TODO: Only add "_source" when self.include_browser_data is True?
             cls_uid_attribute["_source"] = cls_name
             cls_name_attribute["description"] = (f"The event class name,"
                                                  f" as defined by class_uid value: <code>{cls_caption}</code>.")
@@ -746,19 +749,23 @@ class SchemaCompiler:
 
     def _process_objects(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
-        # the observable type_id will be propagated to all children of an object.
+        # the observable type_id enumerations will be propagated to all children of objects.
         self._observables_from_objects()
 
+        self._add_source_to_item_attributes(self._objects, "object")
+        self._add_source_to_patch_item_attributes(self._object_patches, "object")
         self._resolve_patches(self._objects, self._object_patches, "object")
         self._resolve_extends(self._objects, "object")
 
         # Save informational complete object hierarchy (for schema browser)
-        # TODO: only do this when self.include_browser_data is True?
+        # TODO: only add _all_objects when self.include_browser_data is True?
         for obj_name, obj in self._objects.items():
             obj_slice = {}
             for k in ["name", "caption", "extends", "extension"]:
                 if k in obj:
                     obj_slice[k] = obj[k]
+                # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
+                #       The uses of "is_hidden" will need to be changed in the schema browser as well.
                 obj_slice["is_hidden"] = is_hidden_object(obj_name)
             self._all_objects[obj_name] = obj_slice
 
@@ -768,16 +775,19 @@ class SchemaCompiler:
     def _observables_from_classes(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
         for cls_name, cls in self._classes.items():
+            context = "base schema"
             self._validate_class_observables(cls_name, cls, "base schema", is_patch=False)
-            self._observables_from_item_attributes(self._classes, cls_name, cls, "Class", is_patch=False)
-            self._observables_from_item_observables(self._classes, cls_name, cls, "Class", is_patch=False)
+            self._observables_from_item_attributes(self._classes, cls_name, cls, "Class", context, is_patch=False)
+            self._observables_from_item_observables(self._classes, cls_name, cls, "Class", context, is_patch=False)
 
         for patch_name, patch_list in self._class_patches.items():
             for patch in patch_list:
                 context = f'"{patch["extension"]}" extension patch'
                 self._validate_class_observables(patch_name, patch, context, is_patch=True)
-                self._observables_from_item_attributes(self._classes, patch_name, patch, "Class", is_patch=True)
-                self._observables_from_item_observables(self._classes, patch_name, patch, "Class", is_patch=True)
+                self._observables_from_item_attributes(
+                    self._classes, patch_name, patch, "Class", context, is_patch=True)
+                self._observables_from_item_observables(
+                    self._classes, patch_name, patch, "Class", context, is_patch=True)
 
     @staticmethod
     def _validate_class_observables(cls_name: str, cls: JObject, context: str, is_patch: bool) -> None:
@@ -811,18 +821,20 @@ class SchemaCompiler:
             context = "base schema"
             self._validate_object_observables(obj_name, obj, "base schema", is_patch=False)
             self._observables_from_object(obj_name, obj, context)
-            self._observables_from_item_attributes(self._objects, obj_name, obj, "Object", is_patch=False)
+            self._observables_from_item_attributes(self._objects, obj_name, obj, "Object", context, is_patch=False)
             # Not supported:
-            # self._observables_from_item_observables(self._objects, obj_name, obj, "Object", is_patch=False)
+            # self._observables_from_item_observables(self._objects, obj_name, obj, "Object", context, is_patch=False)
 
         for patch_name, patch_list in self._object_patches.items():
             for patch in patch_list:
-                context = f'"{patch["extension"]}" extension patch'
+                context = f'extension "{patch["extension"]}" patch'
                 self._validate_object_observables(patch_name, patch, context, is_patch=True)
                 self._observables_from_object(patch_name, patch, context)
-                self._observables_from_item_attributes(self._objects, patch_name, patch, "Object", is_patch=True)
+                self._observables_from_item_attributes(
+                    self._objects, patch_name, patch, "Object", context, is_patch=True)
                 # Not supported:
-                # self._observables_from_item_observables(self._objects, patch_name, patch, "Object", is_patch=True)
+                # self._observables_from_item_observables(
+                #     self._objects, patch_name, patch, "Object", context, is_patch=True)
 
     @staticmethod
     def _validate_object_observables(obj_name: str, obj: JObject, context: str, is_patch: bool) -> None:
@@ -858,10 +870,11 @@ class SchemaCompiler:
             observable_type_id = str(obj["observable"])
 
             if observable_type_id in self._observable_type_id_dict:
+                entry = self._observable_type_id_dict[observable_type_id]
                 raise SchemaException(
                     f'Collision of observable type_id {observable_type_id} between'
-                    f' "{caption}" object "observable" and'
-                    f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+                    f' {context} "{caption}" object "observable" and'
+                    f' {entry["_observable_kind"]} with caption "{entry["caption"]}"')
 
             self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
                 caption, caption, "Object")
@@ -872,6 +885,7 @@ class SchemaCompiler:
         item_name: str,
         item: JObject,
         kind: str,  # title-case kind; should be "Class" or "Object"
+        context: str,
         is_patch: bool,
     ) -> None:
         if is_patch:
@@ -881,12 +895,12 @@ class SchemaCompiler:
         for attribute_name, attribute in item.setdefault("attributes", {}).items():
             if "observable" in attribute:
                 observable_type_id = str(attribute["observable"])
-
                 if observable_type_id in self._observable_type_id_dict:
+                    entry = self._observable_type_id_dict[observable_type_id]
                     raise SchemaException(
                         f'Collision of observable type_id {observable_type_id} between'
-                        f' "{caption}" {kind} attribute "{attribute_name}" and'
-                        f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+                        f' {context} {kind} "{item_name}" with caption "{caption}" attribute "{attribute_name}" and'
+                        f' {entry["_observable_kind"]} with caption "{entry["caption"]}"')
 
                 self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
                     f"{caption} {kind}: {attribute_name}",
@@ -894,7 +908,7 @@ class SchemaCompiler:
                     f"{kind}-Specific Attribute")
 
     def _observables_from_item_observables(
-        self, items: JObject, item_name: str, item: JObject, kind: str, is_patch: bool
+        self, items: JObject, item_name: str, item: JObject, kind: str, context: str, is_patch: bool
     ) -> None:
         # kind should be title-case: "Class" or "Object"
         if "observables" in item:
@@ -905,10 +919,11 @@ class SchemaCompiler:
             for attribute_path, observable_type_id_num in item["observables"].items():
                 observable_type_id = str(observable_type_id_num)
                 if observable_type_id in self._observable_type_id_dict:
+                    entry = self._observable_type_id_dict[observable_type_id]
                     raise SchemaException(
                         f'Collision of observable type_id {observable_type_id} between'
-                        f' "{caption}" {kind} attribute path "{attribute_path}" and'
-                        f' "{self._observable_type_id_dict[observable_type_id]["caption"]}"')
+                        f' {context} {kind} "{item_name}" with caption "{caption}" attribute path "{attribute_path}"'
+                        f' and {entry["_observable_kind"]} with caption "{entry["caption"]}"')
 
                 self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
                     f"{caption} {kind}: {attribute_path}",
@@ -917,7 +932,6 @@ class SchemaCompiler:
 
     @staticmethod
     def _make_observable_enum_entry(caption: str, description: str, observable_kind: str) -> JObject:
-        # TODO: Only add _observable_kind" when self.include_browser_data is True
         return {
             "caption": caption,
             "description": f"Observable by {observable_kind}.<br>{description}",
@@ -946,6 +960,37 @@ class SchemaCompiler:
             else:
                 break
         return item_name  # fallback
+
+    @staticmethod
+    def _add_source_to_item_attributes(items: JObject, kind: str) -> None:
+        for item_name, item in items.items():
+            for attribute_name, attribute in item.setdefault("attributes", {}).items():
+                try:
+                    attribute["_source"] = item_name
+                except TypeError as e:
+                    if "extension" in item:
+                        kind = f'"{item["extension"]}" extension {kind}'
+                    raise SchemaException(f'Invalid attribute type in "{attribute_name}" of {kind} "{item_name}":'
+                                          f' expected object, but got {json_type_from_value(attribute)}, ') from e
+
+    @staticmethod
+    def _add_source_to_patch_item_attributes(patch_dict: PatchDict, kind: str) -> None:
+        for patch_name, patches in patch_dict.items():
+            for patch in patches:
+                for attribute_name, attribute in patch.setdefault("attributes", {}).items():
+                    try:
+                        attribute["_source"] = patch_name
+                        # Because attribute_source done before patching with _resolve_patches, we need to capture the
+                        # final "patched" type for use by the UI when displaying the source. Other uses of "_source"
+                        # require the original pre-patched source.
+                        attribute["_source_patched"] = patch["extends"]
+                    except TypeError as e:
+                        raise SchemaException(f'Invalid attribute type in "{attribute_name}"'
+                                              f' of extension "{patch["extension"]}" {kind} patch "{patch_name}":'
+                                              f' expected object, but got {json_type_from_value(attribute)}, ') from e
+                    except KeyError as e:
+                        raise SchemaException(f'Attribute "extends" missing in "{attribute_name}" of extension'
+                                              f' "{patch["extension"]}" {kind} patch "{patch_name}"') from e
 
     @staticmethod
     def _resolve_patches(items: JObject, patches: PatchDict, kind: str) -> None:
@@ -1151,10 +1196,13 @@ class SchemaCompiler:
         add magic datetime dictionary attributes as siblings to dictionary attributes with type "timestamp_t".
         """
         got_datetime_profile = "datetime" in self._profiles
-        got_datetime_t = "datetime_t" in self._dictionary.setdefault("types", {}).setdefault("attributes", {})
-        if got_datetime_profile and got_datetime_t:
-            logger.info('This schema defines the "datetime" profile and the "datetime_t" dictionary type,'
-                        ' so datetime siblings of timestamp_t attributes will be added.')
+        dictionary_types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
+        got_datetime_t = "datetime_t" in dictionary_types
+        got_timestamp_t = "timestamp_t" in dictionary_types
+        if got_datetime_profile and got_datetime_t and got_timestamp_t:
+            logger.info('Datetime siblings of attributes with the "timestamp_t" type will be added because the'
+                        ' following are defined in the schema: the "datetime" profile,'
+                        ' the "datetime_t" dictionary type, and the "timestamp_t" dictionary type.')
             # Add datetime siblings
             dictionary_attributes = self._dictionary.setdefault("attributes", {})
             # We can't add dictionary_attributes while iterator, so instead add to another dict and then merge
@@ -1162,7 +1210,7 @@ class SchemaCompiler:
             for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("type") == "timestamp_t":
                     sibling = deepcopy(attribute)
-                    # TODO: fix up attribute_keys in _links if they are actually used
+                    # TODO: fix up attribute_keys in _links if they are actually used (Elixir codes do NOT fix up)
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
                     sibling["profile"] = "datetime"
@@ -1193,8 +1241,8 @@ class SchemaCompiler:
                 if observable_type_id in self._observable_type_id_dict:
                     entry = self._observable_type_id_dict[observable_type_id]
                     raise SchemaException(f'Collision of observable type_id {observable_type_id} between {kind}'
-                                          f' "{key}" with caption "{detail.get("caption")}"'
-                                          f' and {kind} with caption "{entry["caption"]}"')
+                                          f' "{key}" {kind} with caption "{detail.get("caption")}"'
+                                          f' and {entry["kind"]} with caption "{entry["caption"]}"')
                 else:
                     entry = self._make_observable_enum_entry(
                         detail.get("caption", ""), detail.get("description", ""), kind)
@@ -1328,7 +1376,7 @@ class SchemaCompiler:
         add_datetime = got_datetime_profile and got_datetime_t
 
         for item_name, item in items.items():
-            dt_attribute_additions: JObject = {} # we cannot add attributes while iterating attributes
+            dt_attribute_additions: JObject = {}  # we cannot add attributes while iterating attributes
             attributes = item.setdefault("attributes", {})
             for attribute_name, attribute in attributes.items():
                 dictionary_attribute = dictionary_attributes.get(attribute_name, {})
@@ -1355,3 +1403,26 @@ class SchemaCompiler:
                 profiles = item.setdefault("profiles", [])
                 if "datetime" not in profiles:
                     profiles.append("datetime")
+
+    def _ensure_attributes_have_requirement(self) -> None:
+        # Track attributes in profiles, classes, and objects that incorrectly do _not_ have a "requirement"
+        missing_requirements: list[str] = []
+        self._ensure_item_attributes_have_requirement(self._profiles, "profile", missing_requirements)
+        self._ensure_item_attributes_have_requirement(self._classes, "class", missing_requirements)
+        self._ensure_item_attributes_have_requirement(self._objects, "object", missing_requirements)
+        if missing_requirements:
+            missing_requirements.sort()
+            self._warning('%d attribute(s) do not have a "requirement" field, a value of "optional" will be used: %s',
+                          len(missing_requirements), ", ".join(missing_requirements))
+
+    @staticmethod
+    def _ensure_item_attributes_have_requirement(items: JObject, kind: str, missing_requirements: list[str]) -> None:
+        for item_name, item in items.items():
+            for attribute_name, attribute in item.setdefault("attributes", {}).items():
+                if "requirement" not in attribute:
+                    attribute["requirement"] = "optional"
+                    if "extension" in item:
+                        actual_kind = f'extension "{item["extension"]}" {kind}'
+                    else:
+                        actual_kind = kind
+                    missing_requirements.append(f'{actual_kind} "{item_name}" attribute "{attribute_name}"')

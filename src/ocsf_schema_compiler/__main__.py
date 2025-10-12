@@ -64,11 +64,11 @@ def main():
                               args.include_browser_data, args.tolerate_errors)
     schema = compiler.compile()
     # TODO: final version:
-    #   print(json.dumps(schema, cls=CustomEncoder))
+    # print(json.dumps(schema, cls=CustomEncoder))
     # TODO: debugging friendly version:
     # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))
-    print(json.dumps(schema.objects["file"], cls=CustomEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema.objects["process"], cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
 
 
