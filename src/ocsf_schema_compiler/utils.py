@@ -3,7 +3,7 @@ from typing import Any
 from jsonish import JObject
 
 
-def deep_merge(dest: Any, source: Any) -> None:
+def deep_merge(dest: dict, source: dict) -> None:
     """
     In-place merge a source dictionary into a destination dictionary, modifying the destination dictionary.
     Note: this merge does not deep merge dictionaries inside lists.

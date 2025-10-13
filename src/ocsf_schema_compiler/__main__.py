@@ -4,6 +4,7 @@ import logging
 from argparse import ArgumentParser
 from pathlib import Path
 from sys import stderr
+from time import perf_counter
 
 from compiler import SchemaCompiler
 
@@ -60,11 +61,26 @@ def main():
 
     logging.basicConfig(format="%(levelname)s: %(message)s", style="%", stream=stderr, level=args.log_level)
 
+    start_seconds = perf_counter()
+
     compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
                               args.include_browser_data, args.tolerate_errors)
     schema = compiler.compile()
-    # TODO: final version:
-    # print(json.dumps(schema, cls=CustomEncoder))
+
+    duration = perf_counter() - start_seconds
+    logger.info("Schema compilation took %.3f seconds", duration)
+
+    # Output in legacy format
+    output = {
+        "base_event": schema.classes.get("base_event"),
+        "classes": schema.classes,
+        "objects": schema.objects,
+        "dictionary_attributes": schema.dictionary.get("attributes"),
+        "types": schema.dictionary.get("types", {}).get("attributes"),
+        "version": schema.version
+    }
+    print(json.dumps(output))
+
     # TODO: debugging friendly version:
     # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))

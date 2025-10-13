@@ -128,7 +128,7 @@ class SchemaCompiler:
         self._enrich_and_validate_dictionary()
         self._observables_from_dictionary()
 
-        self._enrich_profiles_attributes_from_dictionary()
+        self._enrich_profiles_attributes_from_dictionary()  # TODO: Why are only profile attributes enriched?
         self._validate_object_profiles_and_add_links()
         self._add_object_links()
         self._update_observable_enum()
@@ -141,24 +141,17 @@ class SchemaCompiler:
 
         self._ensure_attributes_have_requirement()
 
-        # TODO: enrich classes and objects with dictionary attribute information?
-        #       See: Cache.export_classes, Cache.export_objects
-        #       NOTE: This is different from how the OCSF Server works. Let's try it and strip out the enrich magic
-        #             from the server.
-        #
-        # TODO: Strip browser-specific keys when self.include_browser_data is False.
-        # if not self.include_browser_data:
-        #     self.strip_browser_data()
-        #
-        # TODO: Profit!
+        self._finish_attributes()
+
+        if not self.include_browser_data:
+            self._delete_browser_data()
 
         # TODO: Double-check compiled schema: diff against Elixir-generated schema
         # TODO: Handle include_browser_data. Probably strip keys with leading underscores
         #       (as opposed to skipping adding browser information, which would skip some validation checks).
-        # TODO: Support item attributes affected by more than one profile.
-        #       Change attribute "profile", a string, to "profiles", an array of strings. At least in new output format.
-        #       Legacy output format can continue with "profile" and use a a comma-separated string.
-        # TODO: Reevaluate uses of "_source" and "_source_patched". Some uses don't seem necessary.
+        # TODO: Support item attributes affected by more than one profile / extension.
+        #       See _merge_attribute_detail.
+        # TODO: Reevaluate uses of "_source" and "_source_patched". Some may not be used in schema browser.
 
         if self._error_count and self._warning_count:
             logger.error("Compile completed with %d error(s) and %d warning(s)", self._error_count, self._warning_count)
@@ -527,17 +520,20 @@ class SchemaCompiler:
     def _merge_attributes_include(self, item: JObject, context: str, include_path: Path) -> None:
         include_item = self._get_include_contents(context, include_path)
 
-        # Create new attributes for item, starting with included attributes
-        # Include files should always have "attributes", but we will be defensive.
-        if "attributes" in include_item:
-            attributes = deepcopy(include_item["attributes"])
-        else:
+        # Include file content should always have "attributes", but we will be defensive.
+        if "attributes" not in include_item:
             self._warning("Include file suspiciously has no attributes: %s", include_path)
-            return  # Nothing to merge. This should never happen, but is possible.
+            return  # Nothing to merge. This should never happen (because it does nothing), but is possible.
+
+        # Create merged attributes by merging item's attributes on top of included attributes
+        # resulting in merge with base of included attributes, overridden by item's.
+
+        attributes = deepcopy(include_item["attributes"])
 
         # item["attributes"] should exist at this point, so no need to double-check
         # Merge item's attributes on top of the copy of the include attribute, preferring item's data
         deep_merge(attributes, item["attributes"])
+
         # replace item "attributes" with merged / resolved include attributes
         item["attributes"] = attributes
 
@@ -549,14 +545,16 @@ class SchemaCompiler:
         context: str,
         include_path: Path
     ) -> None:
-        include_item = self._get_include_contents(context, include_path)
+        include_attribute = self._get_include_contents(context, include_path)
 
-        # Create new attribute_detail for attributes.{attribute_name}, starting with included_item
-        # Include files should always have "attributes", but we will be defensive.
-        new_attribute = deepcopy(include_item)
+        # Create merged attribute detail for attributes.{attribute_name} by merging item attribute's details
+        # on top of included attribute details resulting in merge with base of included details overridden by item's.
+
+        new_attribute = deepcopy(include_attribute)
 
         # Merge original attribute detail on top of the copy of the included attribute_detail, preferring the original
         deep_merge(new_attribute, attribute)
+
         # replace existing attribute detail with the new merged detail
         attributes[attribute_name] = new_attribute
 
@@ -998,14 +996,16 @@ class SchemaCompiler:
             for patch in patch_list:
                 base_name = patch["extends"]  # this will be the same as patch_name
                 assert patch_name == base_name, "Patch name should match extends base name"
-                extension_name = patch.get("extension", "<unknown>")
-                logger.info('"%s" %s from "%s" extension is patching "%s"', patch_name, kind, extension_name, base_name)
+                context = f'extension "{patch.get("extension", "<unknown>")}" {kind} patch "{patch_name}"'
+                logger.info('%s is patching "%s"', context, base_name)
                 if base_name not in items:
-                    raise SchemaException(f'"{patch_name}" {kind} from "{extension_name}" extension'
-                                          f' is attempting to patch undefined {kind} "{base_name}"')
+                    raise SchemaException(f'{context} attempted to patch undefined {kind} "{base_name}"')
                 base = items[base_name]
                 SchemaCompiler._merge_profiles(base, patch)
-                deep_merge(base.setdefault("attributes", {}), patch.setdefault("attributes", {}))
+
+                SchemaCompiler._merge_attributes(
+                    base.setdefault("attributes", {}), patch.setdefault("attributes", {}), context)
+
                 # Top-level observable.
                 # Only occurs in objects, but is safe to do for classes too.
                 put_non_none(base, "observable", patch.get("observable"))
@@ -1017,6 +1017,39 @@ class SchemaCompiler:
                 # Only occurs in classes, but is safe to do for objects too.
                 put_non_none(base, "associations", patch.get("associations"))
                 SchemaCompiler._patch_constraints(base, patch)
+
+    @staticmethod
+    def _merge_attributes(dest_attributes: JObject, source_attributes: JObject, context: str) -> None:
+        for source_attribute_name, source_attribute in source_attributes.items():
+            if source_attribute_name in dest_attributes:
+                dest_attribute = dest_attributes[source_attribute_name]
+                SchemaCompiler._merge_attribute_detail(
+                    dest_attribute, source_attribute, f'{context} attribute "{source_attribute_name}"')
+            else:
+                dest_attributes[source_attribute_name] = source_attribute
+
+    @staticmethod
+    def _merge_attribute_detail(dest_attribute: JObject, source_attribute: JObject, context: str) -> None:
+        for source_key, source_value in source_attribute.items():
+            if source_key == "profile":
+                if source_value is None: # special meaning: don't enable via profile
+                    pass
+                else:
+                    if "profile" in dest_attribute and dest_attribute["profile"] != source_value:
+                        # TODO: We cannot currently handle merging attribute details from multiple profiles.
+                        #       We need to handle profiles and patching the same attribute from multiple
+                        #       extensions and/or profiles. The following (at least) will need to become lists
+                        #       everywhere (before any merging): "profile", "extension", and "extension_id".
+                        #       During merge we will also need to reconcile "requirement" and possibly other
+                        #       attribute details.
+                        raise SchemaException(f'{context} attempted merge of "profile" with different non-null values;'
+                                              f' existing: {dest_attribute}')
+
+            if (source_key in dest_attribute
+                  and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
+                deep_merge(dest_attribute[source_key], source_value)
+            else:
+                dest_attribute[source_key] = source_value
 
     @staticmethod
     def _merge_profiles(dest: JObject, source: JObject) -> None:
@@ -1267,11 +1300,12 @@ class SchemaCompiler:
                     #       The "splunk" extension has several instances of this problem.
                     #       These errors must either be fixed, or this compile needs to replicate the hack from Elixir.
                     if "extension" in profile:
-                        description = f'"{profile_name}" from extension "{profile["extension"]}"'
+                        source = f'extension "{profile["extension"]}" profile "{profile_name}"'
                     else:
-                        description = f'"{profile_name}"'
-                    self._tolerable_error(SchemaException(f'Profile {description}'
-                                                          f' uses undefined dictionary attribute "{profile_attribute_name}"'))
+                        source = f'profile "{profile_name}"'
+                    self._tolerable_error(SchemaException(f'Attribute "{profile_attribute_name}" in {source}'
+                                                          f' is not a defined dictionary attribute'
+                                                          f' (found when enriching profile attributes)'))
 
     def _validate_object_profiles_and_add_links(self) -> None:
         self._validate_profiles_and_add_links("object", self._objects)
@@ -1426,3 +1460,80 @@ class SchemaCompiler:
                     else:
                         actual_kind = kind
                     missing_requirements.append(f'{actual_kind} "{item_name}" attribute "{attribute_name}"')
+
+    def _finish_attributes(self):
+        self._finish_item_attributes(self._classes, "class")
+        self._finish_item_attributes(self._objects, "object")
+        # TODO: Is this redundant with _enrich_profiles_attributes_from_dictionary?
+        #       Perhaps we can remove _enrich_profiles_attributes_from_dictionary.
+        self._finish_item_attributes(self._profiles, "profile")
+
+    def _finish_item_attributes(self, items: JObject, kind: str) -> None:
+        dictionary_attributes = self._dictionary.setdefault("attributes", {})
+        for item_name, item in items.items():
+            attributes = item.setdefault("attributes", {})
+            new_attributes = {}
+            for attribute_name, attribute in attributes.items():
+                if attribute_name in dictionary_attributes:
+                    new_attribute = deepcopy(dictionary_attributes[attribute_name])
+                    deep_merge(new_attribute, attribute)
+                    new_attributes[attribute_name] = new_attribute
+                else:
+                    # TODO: This is an identical error as found in _enrich_profiles_attributes_from_dictionary
+                    #       and occurs with the current "splunk" extension.
+                    if "extension" in item:
+                        actual_kind = f'extension "{item["extension"]}" {kind}'
+                    else:
+                        actual_kind = kind
+                    self._tolerable_error(SchemaException(f'Attribute "{attribute_name}" in {actual_kind} "{item_name}"'
+                                                          f' is not a defined dictionary attribute'
+                                                          f' (found when finishing attributes)'))
+            item["attributes"] = new_attributes
+            if self.include_browser_data:
+                self._add_sibling_of_to_attributes(new_attributes)
+
+    @staticmethod
+    def _add_sibling_of_to_attributes(attributes: JObject) -> None:
+        # This must be done after finalizing attributes so full enum attribute details are present.
+        # Specifically the enum attribute "sibling" key.
+
+        sibling_of_dict: dict[str, str] = {}
+        # Enum attributes point to their enum sibling through the :sibling attribute,
+        # however the siblings do _not_ refer back to their related enum attribute, so let's build that.
+        # First pass, iterate attributes to find enum attributes and create mapping to their siblings.
+        for attribute_name, attribute in attributes.items():
+            if "sibling" in attribute:
+                # This is an enum attribute
+                sibling_of_dict[attribute["sibling"]] = attribute_name
+
+        if not sibling_of_dict:
+            # no enum attributes present in attributes, so nothing to do
+            return # skip iterating attributes again uselessly
+
+        # Second pass, look for enum attributes and add "_sibling_of" mapping
+        for attribute_name, attribute in attributes.items():
+            if attribute_name in sibling_of_dict:
+                # This is an enum sibling. Add "_sibling_of" pointing back to its related enum attribute.
+                attribute["_sibling_of"] = sibling_of_dict[attribute_name]
+
+    def _delete_browser_data(self) -> None:
+        deleted_keys: set[str] = set()
+        self._clean(self._classes, deleted_keys)
+        self._clean(self._objects, deleted_keys)
+        self._clean(self._dictionary, deleted_keys)
+        self._clean(self._profiles, deleted_keys)
+        logger.info("Deleted keys only needed by schema browser: %s", ", ".join(sorted(deleted_keys)))
+
+    @staticmethod
+    def _clean(obj: JObject, deleted_keys: set[str]) -> None:
+        keys_to_delete: list[str] = []
+        for key, value in obj.items():
+            if key.startswith("_"):
+                keys_to_delete.append(key)
+            elif isinstance(value, dict):
+                # This is a dict mapped to a key we are keeping
+                SchemaCompiler._clean(value, deleted_keys)
+        for key in keys_to_delete:
+            del obj[key]
+            deleted_keys.add(key)
+
