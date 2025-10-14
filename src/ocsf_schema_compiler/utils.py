@@ -6,7 +6,7 @@ from jsonish import JObject
 def deep_merge(dest: dict, source: dict) -> None:
     """
     In-place merge a source dictionary into a destination dictionary, modifying the destination dictionary.
-    Note: this merge does not deep merge dictionaries inside lists.
+    Note: this merge does not merge lists or deep merge dictionaries inside lists. List values are simply overwritten.
     """
     if isinstance(dest, dict) and isinstance(source, dict):
         for source_key, source_value in source.items():
@@ -34,21 +34,20 @@ def is_hidden_object(obj_name: str) -> bool:
     return obj_name.startswith("_")
 
 
-def extension_scoped_category_uid(extension_uid: int, original_category_uid: int) -> int:
+def extension_scoped_category_uid(extension_uid: int, category_uid: int) -> int:
     """Return an extension-specific category UID."""
-    assert original_category_uid < 100, \
-        f"category_uid {original_category_uid} should be less than 100 (not yet extension UID scoped)"
-    return extension_uid * 100 + original_category_uid
+    assert category_uid < 100, \
+        f"category_uid {category_uid} should be less than 100 (not yet extension UID scoped)"
+    return extension_uid * 100 + category_uid
 
 
 def category_scoped_class_uid(category_uid: int, cls_uid: int) -> int:
     """Return a category-specific class UID."""
-    assert category_uid < 100, f"category_uid {category_uid} should be less than 100 (not extension UID scoped)"
     assert cls_uid < 1000, f"class UID {cls_uid} should be less than 1000 (not yet category UID scoped)"
     return category_uid * 1000 + cls_uid
 
 
 def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     """Return a class-specific type UID."""
-    assert type_uid < 1000, f"type_uid {type_uid} should be less than 1000 (not class UID scoped)"
-    return cls_uid * 1000 + type_uid
+    assert type_uid < 100, f"type_uid {type_uid} should be less than 1000 (not class UID scoped)"
+    return cls_uid * 100 + type_uid

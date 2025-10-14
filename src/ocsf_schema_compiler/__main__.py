@@ -7,6 +7,7 @@ from sys import stderr
 from time import perf_counter
 
 from compiler import SchemaCompiler
+from jsonish import JObject
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +72,14 @@ def main():
     logger.info("Schema compilation took %.3f seconds", duration)
 
     # Output in legacy format
+    # TODO: add command line arg to pick output format
+    legacy_classes = items_to_legacy(schema.classes)
+    legacy_objects = items_to_legacy(schema.objects)
+    dictionary_to_legacy(schema.dictionary)
     output = {
-        "base_event": schema.classes.get("base_event"),
-        "classes": schema.classes,
-        "objects": schema.objects,
+        "base_event": legacy_classes.get("base_event"),
+        "classes": legacy_classes,
+        "objects": legacy_objects,
         "dictionary_attributes": schema.dictionary.get("attributes"),
         "types": schema.dictionary.get("types", {}).get("attributes"),
         "version": schema.version
@@ -83,9 +88,36 @@ def main():
 
     # TODO: debugging friendly version:
     # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
-    # print(json.dumps(schema.classes["base_event"], cls=CustomEncoder, indent=2, sort_keys=True))
+    # print(json.dumps(schema.classes["registry_value_activity"], cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.objects["process"], cls=CustomEncoder, indent=2, sort_keys=True))
     # print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
+
+
+def items_to_legacy(items: JObject) -> JObject :
+    legacy_items = {}
+    for item_name, item in items.items():
+        if "extension" in item:
+            legacy_items[f'{item["extension"]}/{item_name}'] = item
+        else:
+            legacy_items[item_name] = item
+        if "attributes" in item:
+            for attribute in item["attributes"].values():
+                if "extension" in attribute and "object_type" in attribute:
+                    attribute["object_type"] = f'{attribute["extension"]}/{attribute["object_type"]}'
+    return legacy_items
+
+
+def dictionary_to_legacy(dictionary: dict) -> None:
+    legacy_attributes = {}
+    for attribute_name, attribute in dictionary["attributes"].items():
+        if "extension" in attribute:
+            extension = attribute["extension"]
+            if "object_type" in attribute:
+                attribute["object_type"] = f'{extension}/{attribute["object_type"]}'
+            legacy_attributes[f'{extension}/{attribute_name}'] = attribute
+        else:
+            legacy_attributes[attribute_name] = attribute
+    dictionary["attributes"] = legacy_attributes
 
 
 if __name__ == '__main__':

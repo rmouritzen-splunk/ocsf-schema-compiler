@@ -366,17 +366,17 @@ class SchemaCompiler:
     def _read_and_enrich_extension_profiles(
         self, extension_id: int, extension_name: str, base_path: Path
     ) -> JObject:
-        item_callback = lambda path, item: self._enrich_extension_profile(extension_id, extension_name, path, item)
-        return read_structured_items(base_path, "profiles", item_callback)
+        enrich_profile = lambda path, item: self._enrich_extension_profile(extension_id, extension_name, path, item)
+        return read_structured_items(base_path, "profiles", enrich_profile)
 
     def _enrich_profile(self, path: Path, profile: JObject) -> None:
         attributes = profile.setdefault("attributes", {})
         profile_name = profile.get("name")
-        if not isinstance(profile_name, str):
-            raise SchemaException(f'Profile "name" value must be a string,'
-                                  f' but got {json_type_from_value(profile_name)}')
-        for attribute in attributes.values():
+        annotations = profile.get("annotations")
+        for attribute_name, attribute in attributes.items():
             attribute["profile"] = profile_name
+            if annotations:
+                self._add_profile_annotations(annotations, attribute)
         self._include_cache[path] = profile
 
     def _enrich_extension_profile(
@@ -384,14 +384,21 @@ class SchemaCompiler:
     ) -> None:
         attributes = profile.setdefault("attributes", {})
         profile_name = profile.get("name")
-        if not isinstance(extension_name, str):
-            raise SchemaException(f'Extension "{extension_name}" profile "name" value must be a string,'
-                                  f' but got {json_type_from_value(profile_name)}')
-        for attribute in attributes.values():
+        annotations = profile.get("annotations")
+        for attribute_name, attribute in attributes.items():
             attribute["profile"] = profile_name
-            attribute["extension_id"] = extension_id
             attribute["extension"] = extension_name
+            attribute["extension_id"] = extension_id
+            if annotations:
+                self._add_profile_annotations(annotations, attribute)
         self._include_cache[path] = profile
+
+    @staticmethod
+    def _add_profile_annotations(annotations: JObject, attribute: JObject) -> None:
+        for key, value in annotations.items():
+            # Only add annotation mappings that do no exist already in annotation
+            if key not in attribute:
+                attribute[key] = value
 
     def _resolve_includes(self) -> None:
         path_resolver = lambda file_name: self.schema_path / file_name
@@ -532,7 +539,7 @@ class SchemaCompiler:
 
         # item["attributes"] should exist at this point, so no need to double-check
         # Merge item's attributes on top of the copy of the include attribute, preferring item's data
-        deep_merge(attributes, item["attributes"])
+        SchemaCompiler._merge_attributes(attributes, item["attributes"], context)
 
         # replace item "attributes" with merged / resolved include attributes
         item["attributes"] = attributes
@@ -647,6 +654,11 @@ class SchemaCompiler:
             if attribute_type not in types_attributes:
                 attribute["type"] = "object_t"
                 attribute["object_type"] = attribute_type
+                if attribute_type in self._objects:
+                    attribute["object_name"] = self._objects[attribute_type].get("caption")
+                else:
+                    raise SchemaException(f'Dictionary attribute "{attribute_name}"'
+                                          f' uses undefined object "{attribute_type}"')
 
     def _process_classes(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
@@ -658,17 +670,17 @@ class SchemaCompiler:
         self._resolve_patches(self._classes, self._class_patches, "class")
         self._resolve_extends(self._classes, "class")
 
-        # Save informational complete class hierarchy (for schema browser)
-        # TODO: only add _all_classes when self.include_browser_data is True?
-        for cls_name, cls in self._classes.items():
-            cls_slice = {}
-            for k in ["name", "caption", "extends", "extension"]:
-                if k in cls:
-                    cls_slice[k] = cls[k]
-            # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
-            #       The uses of "is_hidden" will need to be changed in the schema browser as well.
-            cls_slice["is_hidden"] = is_hidden_class(cls_name, cls)
-            self._all_classes[cls_name] = cls_slice
+        if self.include_browser_data:
+            # Save informational complete class hierarchy (for schema browser)
+            for cls_name, cls in self._classes.items():
+                cls_slice = {}
+                for k in ["name", "caption", "extends", "extension"]:
+                    if k in cls:
+                        cls_slice[k] = cls[k]
+                # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
+                #       The uses of "is_hidden" will need to be changed in the schema browser as well.
+                cls_slice["is_hidden"] = is_hidden_class(cls_name, cls)
+                self._all_classes[cls_name] = cls_slice
 
         # Remove hidden classes
         self._classes = {name: cls for name, cls in self._classes.items() if not is_hidden_class(name, cls)}
@@ -687,7 +699,12 @@ class SchemaCompiler:
             else:
                 category_uid = 0
 
-            cls_uid = category_scoped_class_uid(category_uid, cls.get("uid", 0))
+            if "extension_id" in cls:
+                scoped_category_uid = extension_scoped_category_uid(cls["extension_id"], category_uid)
+                cls_uid = category_scoped_class_uid(scoped_category_uid, cls.get("uid", 0))
+            else:
+                cls_uid = category_scoped_class_uid(category_uid, cls.get("uid", 0))
+
             cls["uid"] = cls_uid
 
             # add/update type_uid attribute
@@ -726,24 +743,29 @@ class SchemaCompiler:
             # add category_uid
             # add/update category_uid and category_name attributes
             if category:
-                category_uid = category.get("uid", 0)
                 cls["category_uid"] = category_uid
 
                 category_uid_attribute = cls_attributes.setdefault("category_uid", {})
-                enum = category_uid_attribute.setdefault("enum", {})
+                # Replace existing enum; leaf classes only include their one category
+                # Doing ths prevents including base_event's 0 - Uncategorized enum value.
+                enum = {}
                 category_uid_key = str(category_uid)
                 enum[category_uid_key] = deepcopy(category)
+                category_uid_attribute["enum"] = enum
 
                 category_name_attribute = cls_attributes.setdefault("category_name", {})
                 category_name_attribute["description"] = (f"The event category name, as defined by category_uid value:"
-                                                          f" <code>{category.get("caption", "")}</code>.)")
+                                                          f" <code>{category.get("caption", "")}</code>.")
             else:
                 if category_key == "other":
                     logger.info('Class "%s" uses special undefined category "other"', cls_name)
+                    cls["category_uid"] = 0
                 elif category_key is None:
-                    self._warning('Class "%s" has no category', cls_name)
+                    # TODO: self._warning('Class "%s" has no category', cls_name)
+                    raise SchemaException(f'Class "{cls_name}" has no category')
                 else:
-                    self._warning('Class "%s" has undefined category "%s"', cls_name, category_key)
+                    # TODO: self._warning('Class "%s" has undefined category "%s"', cls_name, category_key)
+                    raise SchemaException(f'Class "{cls_name}" has undefined category "{category_key}"')
 
     def _process_objects(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
@@ -755,17 +777,17 @@ class SchemaCompiler:
         self._resolve_patches(self._objects, self._object_patches, "object")
         self._resolve_extends(self._objects, "object")
 
-        # Save informational complete object hierarchy (for schema browser)
-        # TODO: only add _all_objects when self.include_browser_data is True?
-        for obj_name, obj in self._objects.items():
-            obj_slice = {}
-            for k in ["name", "caption", "extends", "extension"]:
-                if k in obj:
-                    obj_slice[k] = obj[k]
-                # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
-                #       The uses of "is_hidden" will need to be changed in the schema browser as well.
-                obj_slice["is_hidden"] = is_hidden_object(obj_name)
-            self._all_objects[obj_name] = obj_slice
+        if self.include_browser_data:
+            # Save informational complete object hierarchy (for schema browser)
+            for obj_name, obj in self._objects.items():
+                obj_slice = {}
+                for k in ["name", "caption", "extends", "extension"]:
+                    if k in obj:
+                        obj_slice[k] = obj[k]
+                    # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
+                    #       The uses of "is_hidden" will need to be changed in the schema browser as well.
+                    obj_slice["is_hidden"] = is_hidden_object(obj_name)
+                self._all_objects[obj_name] = obj_slice
 
         # Remove hidden objects
         self._objects = {name: obj for name, obj in self._objects.items() if not is_hidden_object(name)}
@@ -1033,6 +1055,7 @@ class SchemaCompiler:
         for source_key, source_value in source_attribute.items():
             if source_key == "profile":
                 if source_value is None: # special meaning: don't enable via profile
+                    # TODO: delete key. Leave for now to help diffs with Elixir export by being consistent with it.
                     pass
                 else:
                     if "profile" in dest_attribute and dest_attribute["profile"] != source_value:
@@ -1042,8 +1065,8 @@ class SchemaCompiler:
                         #       everywhere (before any merging): "profile", "extension", and "extension_id".
                         #       During merge we will also need to reconcile "requirement" and possibly other
                         #       attribute details.
-                        raise SchemaException(f'{context} attempted merge of "profile" with different non-null values;'
-                                              f' existing: {dest_attribute}')
+                        raise SchemaException(f'{context} attempted merge of "profile" with different non-null value'
+                                              f' "{source_value}", existing: {dest_attribute}')
 
             if (source_key in dest_attribute
                   and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
@@ -1083,7 +1106,7 @@ class SchemaCompiler:
         SchemaCompiler._resolve_item_extends(items, parent_name, items.get(parent_name), kind)
         assert parent_name == item.get("extends"), (f'{kind} "{item_name}" "extends" value should not change after'
                                                     f' recursively processing parent: original value: "{parent_name}",'
-                                                    f' current value: "{item.get("extends")}"')
+                                                    f' current value: "{item.get("extends", "<deleted>")}"')
 
         if parent_name:
             parent_item = items.get(parent_name)
@@ -1199,7 +1222,7 @@ class SchemaCompiler:
                 object_type = attribute["object_type"]
                 if object_type in self._objects:
                     obj = self._objects[object_type]
-                    obj["object_name"] = obj.get("caption", "")
+                    attribute["object_name"] = obj.get("caption", "")
                 else:
                     raise SchemaException(
                         f'Undefined object type in dictionary attribute "{attribute_name}": "{object_type}"')
@@ -1246,7 +1269,6 @@ class SchemaCompiler:
                     # TODO: fix up attribute_keys in _links if they are actually used (Elixir codes do NOT fix up)
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
-                    sibling["profile"] = "datetime"
                     additions[self._make_datetime_attribute_name(attribute_name)] = sibling
             dictionary_attributes.update(additions)
         elif got_datetime_profile:
@@ -1343,8 +1365,7 @@ class SchemaCompiler:
             links = []
             for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("object_type") == obj_name and "_links" in attribute:
-                    if "_links" in attribute:
-                        links.extend(deepcopy(attribute["_links"]))
+                    links.extend(deepcopy(attribute["_links"]))
 
             # Group by group and type and merge attribute_keys
             grouped_links = {}
@@ -1381,20 +1402,13 @@ class SchemaCompiler:
     def _update_linked_class_profiles(self) -> None:
         self._update_linked_item_profiles("class", self._classes)
 
-    @staticmethod
-    def _update_linked_item_profiles(group: str, items: JObject) -> None:
-        for from_item_name, from_item in items.items():
-            if "profiles" in from_item and "_links" in from_item:
-                # Merge this item's profiles in to all linked items in same group (object or class)
-                from_profiles = from_item["profiles"]
-                for from_link in from_item["_links"]:
-                    if from_link["group"] == group:
-                        to_item_name = from_link["type"]
-                        to_item = items[to_item_name]
-                        to_profiles = to_item.setdefault("profiles", [])
-                        for from_item_profile in from_profiles:
-                            if from_item_profile not in to_profiles:
-                                to_profiles.append(from_item_profile)
+    def _update_linked_item_profiles(self, group: str, items: JObject) -> None:
+        for obj in self._objects.values():
+            if "profiles" in obj and "_links" in obj:
+                for link in obj["_links"]:
+                    if link["group"] == group:
+                        item = items[link["type"]]
+                        self._merge_profiles(item, obj)
 
     def _verify_object_attributes_and_add_datetime(self) -> None:
         self._verify_item_attributes_and_add_datetime(self._objects, "object")
