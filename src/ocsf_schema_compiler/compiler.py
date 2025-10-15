@@ -117,7 +117,9 @@ class SchemaCompiler:
             raise FileNotFoundError(f"Schema path does not exist: {self.schema_path}")
 
         self._read_base_schema()
-        self._resolve_includes()
+
+        # The extensions returned here are the information about the extension without the things it defines,
+        # which are processed and merged by _read_and_merge_extensions.
         extensions = self._read_and_merge_extensions()
 
         self._enrich_dictionary_object_types()
@@ -198,6 +200,7 @@ class SchemaCompiler:
         self._classes = read_structured_items(self.schema_path, "events")
         self._objects = read_structured_items(self.schema_path, "objects")
         self._profiles = self._read_and_enrich_profiles()
+        self._resolve_includes()
 
     def _read_version(self) -> None:
         version_path = self.schema_path / "version.json"
@@ -211,13 +214,18 @@ class SchemaCompiler:
             raise SchemaException(f'The "version" key is missing in the schema version file: {version_path}') from e
 
     def _read_and_merge_extensions(self) -> JObject:
-        extensions: list[Extension] = self._read_all_extensions()
+        extensions: list[Extension] = self._read_extensions()
         self._resolve_extension_includes(extensions)
+
+        for extension in extensions:
+            self._fix_extension_profile_uses(extension)
+
         self._merge_categories_from_extensions(extensions)
         self._merge_classes_from_extensions(extensions)
         self._merge_objects_from_extensions(extensions)
         self._merge_dictionary_from_extensions(extensions)
         self._merge_profiles_from_extensions(extensions)
+
         self._consolidate_extension_patches(extensions)
 
         extension_dict: JObject = {}
@@ -232,18 +240,18 @@ class SchemaCompiler:
             }
         return extension_dict
 
-    def _read_all_extensions(self) -> list[Extension]:
+    def _read_extensions(self) -> list[Extension]:
         extensions: list[Extension] = []
         if not self.ignore_platform_extensions:
-            self._read_extensions(extensions, self.schema_path / "extensions", is_platform_extension=True)
+            self._read_extensions_in_path(extensions, self.schema_path / "extensions", is_platform_extension=True)
         if self.extensions_paths:
             for extensions_path in self.extensions_paths:
-                self._read_extensions(extensions, extensions_path, is_platform_extension=False)
+                self._read_extensions_in_path(extensions, extensions_path, is_platform_extension=False)
 
         self._enrich_extension_items(extensions)
         return extensions
 
-    def _read_extensions(
+    def _read_extensions_in_path(
         self, extensions: list[Extension], base_path: Path, is_platform_extension: bool
     ) -> None:
         for dir_path, dir_names, file_names in os.walk(base_path, topdown=False):
@@ -291,33 +299,32 @@ class SchemaCompiler:
         else:
             dictionary = {}
 
-        profiles = self._read_and_enrich_extension_profiles(uid, name, base_path)
+        profiles = self._read_and_enrich_extension_profiles(base_path)
 
-        try:
-            if is_platform_extension and "version" not in info:
-                # Fall back to overall schema version for platform extensions that do not specify their own version
-                version = self._version
-            else:
-                version = info["version"]
-            return Extension(
-                base_path=base_path,
-                uid=uid,
-                name=name,
-                is_platform_extension=is_platform_extension,
-                caption=info.get("caption"),
-                description=info.get("description"),
-                version=version,
-                categories=categories,
-                classes=classes,
-                class_patches=class_patches,
-                objects=objects,
-                object_patches=object_patches,
-                dictionary=dictionary,
-                profiles=profiles,
-            )
-        except KeyError as e:
-            raise SchemaException(
-                f"Extension has malformed extension.json file - missing {e}: {extension_info_path}") from e
+        if is_platform_extension and "version" not in info:
+            # Fall back to overall schema version for platform extensions that do not specify their own version
+            version = self._version
+        elif "version" in info:
+            version = info["version"]
+        else:
+            raise SchemaException(f'Extension extension.json file is missing "version": {extension_info_path}')
+
+        return Extension(
+            base_path=base_path,
+            uid=uid,
+            name=name,
+            is_platform_extension=is_platform_extension,
+            caption=info.get("caption"),
+            description=info.get("description"),
+            version=version,
+            categories=categories,
+            classes=classes,
+            class_patches=class_patches,
+            objects=objects,
+            object_patches=object_patches,
+            dictionary=dictionary,
+            profiles=profiles,
+        )
 
     @staticmethod
     def _enrich_extension_items(extensions: list[Extension]) -> None:
@@ -357,18 +364,16 @@ class SchemaCompiler:
             for profile in extension.profiles.values():
                 profile["extension"] = extension.name
                 profile["extension_id"] = extension.uid
-                for profile_attribute in profile.setdefault("attributes", {}).values():
-                    profile_attribute["extension"] = extension.name
-                    profile_attribute["extension_id"] = extension.uid
+                # We do not want to add extension and extension_id profiles for two reasons.
+                #   1. Some attributes will be defined in base schema and so this would be wrong.
+                #   2. The dictionary attribute information is merged with class and object attributes, so the
+                #      attributes actually from the extension will be properly annotated
 
     def _read_and_enrich_profiles(self) -> JObject:
         return read_structured_items(self.schema_path, "profiles", self._enrich_profile)
 
-    def _read_and_enrich_extension_profiles(
-        self, extension_id: int, extension_name: str, base_path: Path
-    ) -> JObject:
-        enrich_profile = lambda path, item: self._enrich_extension_profile(extension_id, extension_name, path, item)
-        return read_structured_items(base_path, "profiles", enrich_profile)
+    def _read_and_enrich_extension_profiles(self, base_path: Path) -> JObject:
+        return read_structured_items(base_path, "profiles", self._enrich_profile)
 
     def _enrich_profile(self, path: Path, profile: JObject) -> None:
         attributes = profile.setdefault("attributes", {})
@@ -380,19 +385,76 @@ class SchemaCompiler:
                 self._add_attribute_annotations(annotations, attribute)
         self._include_cache[path] = profile
 
-    def _enrich_extension_profile(
-        self, extension_id: int, extension_name: str, path: Path, profile: JObject
-    ) -> None:
-        attributes = profile.setdefault("attributes", {})
-        profile_name = profile.get("name")
-        annotations = profile.get("annotations")
-        for attribute_name, attribute in attributes.items():
-            attribute["profile"] = profile_name
-            attribute["extension"] = extension_name
-            attribute["extension_id"] = extension_id
-            if annotations:
-                self._add_attribute_annotations(annotations, attribute)
-        self._include_cache[path] = profile
+    def _fix_extension_profile_uses(self, extension: Extension) -> None:
+        self._fix_extension_profile_uses_in_items(extension, extension.classes, "class")
+        self._fix_extension_profile_uses_in_items(extension, extension.class_patches, "class patch")
+        self._fix_extension_profile_uses_in_items(extension, extension.objects, "object")
+        self._fix_extension_profile_uses_in_items(extension, extension.object_patches, "object patch")
+
+    def _fix_extension_profile_uses_in_items(self, extension: Extension, items: JObject, kind: str) -> None:
+        # Structured items can be classes, objects, class patches, or object patches
+        for item_name, item in items.items():
+            item_context = f'Extension "{extension.name}" {kind} "{item_name}"'
+            profiles_names = item.get("profiles")
+            if profiles_names:
+                profiles_context = f'{item_context} "profiles"'
+                is_any_fixed = False
+                new_profile_names = []
+                for profile_name in profiles_names:
+                    is_fixed, fixed_name = self._fix_extension_profile(extension, profile_name, profiles_context)
+                    if is_fixed:
+                        is_any_fixed = True
+                        new_profile_names.append(fixed_name)
+                    else:
+                        new_profile_names.append(profile_name)
+                if is_any_fixed:
+                    item["profiles"] = new_profile_names
+
+            for attribute_name, attribute in item.setdefault("attributes", {}).items():
+                profile_name = attribute.get("profile")
+                if profile_name:
+                    attribute_context = f'{item_context} attribute "{attribute_name}"'
+                    is_fixed, fixed_name = self._fix_extension_profile(extension, profile_name, attribute_context)
+                    if is_fixed:
+                        attribute["profile"] = fixed_name
+
+    def _fix_extension_profile(
+        self, extension: Extension, profile_name: Optional[str], context: str
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Validates a profile reference used in an extension.
+        Raises a SchemaException if validation fails.
+        Returns False, None if profile_name is good, and True, str if the profile name should be changed.
+        """
+        if profile_name:
+            # A "profile" can be set to null, meaning the attribute is not affected by any profile (always active)
+            if "/" in profile_name:
+                split = profile_name.split("/")
+                extension_name = split[0]
+                if extension_name != extension.name:
+                    raise SchemaException(f'{context} references profile "{profile_name}" that is scoped to a'
+                                          f' different extension: "{extension_name}"')
+                unscoped_profile_name = split[1]
+                if unscoped_profile_name in extension.profiles:
+                    logger.debug('%s uses scoped profile "%s"', context, profile_name)
+                else:
+                    raise SchemaException(f'{context} references profile "{profile_name}" that is undefined in this'
+                                          f' extension and is not a platform extension')
+            else:
+                if profile_name in extension.profiles:
+                    # This profile is defined, but should be scoped
+                    scoped_profile_name = f'{extension.name}/{profile_name}'
+                    self._warning('%s references unscoped profile "%s"; changing to "%s"',
+                                  context, profile_name, scoped_profile_name)
+                    return True, scoped_profile_name
+                elif profile_name in self._profiles:
+                    # this is fine
+                    logger.info('%s uses base schema profile "%s"', context, profile_name)
+                else:
+                    raise SchemaException(f'{context} references profile "{profile_name}" that is undefined in this'
+                                          f' extension and the base schema; note that references to extension profiles'
+                                          f' should be scoped, e.g., "{extension.name}/{profile_name}"')
+        return False, None
 
     @staticmethod
     def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
@@ -487,6 +549,8 @@ class SchemaCompiler:
                 raise TypeError(f"Illegal {sub_context} value type:"
                                 f" expected string or array (list), but got {json_type_from_value(include_value)}")
 
+        # TODO: Enable via flag or carefully determine if include is overwriting anything,
+        #       perhaps with a new overwrite flag to utils.deep_merge.
         # Second resolve $include in attribute details. An include at this level is a JSON object containing
         # exactly the information to merge in. These are (or were) used to extract common enum values.
         # The merge prefers existing values. The existing attributes details (if any) are merged on top of
@@ -613,11 +677,20 @@ class SchemaCompiler:
             deep_merge(dictionary_types_attributes, ext_dictionary_types_attributes)
 
     def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
+        # TODO: Should extension profiles be extension scoped?
+        #       No other extension items are scoped, at least not effectively.
+        #       This answer affects concrete event.
+        #       This question needs to be asked of the community, as this could break existing usage.
+        #       Final answer might be allowing either form in concrete events.
         for extension in extensions:
             if extension.profiles:
                 self._merge_extension_items(extension.name, extension.profiles, self._profiles, "profile")
                 # Also merge with extension scoped profiles dictionary
                 for profile_name, profile in extension.profiles.items():
+                    # TODO
+                    if "/" in profile_name:
+                        raise SchemaException(
+                            f'Unexpected scoped profile in "{extension.name}" profile "{profile_name}"')
                     scoped_name = f'{extension.name}/{profile_name}'
                     if scoped_name in self._extension_scoped_profiles:
                         other_profile = self._extension_scoped_profiles[scoped_name]
@@ -897,7 +970,7 @@ class SchemaCompiler:
                     f' non-hidden child objects of "{obj_name}".')
 
     def _observables_from_object(self, obj_name: str, obj: JObject, context: str) -> None:
-        caption = self._find_item_caption(self._objects, obj_name, obj)
+        caption, description = self._find_item_caption_and_description(self._objects, obj_name, obj)
         if "observable" in obj:
             observable_type_id = str(obj["observable"])
 
@@ -908,8 +981,8 @@ class SchemaCompiler:
                     f' {context} "{caption}" object "observable" and'
                     f' {entry["_observable_kind"]} with caption "{entry["caption"]}"')
 
-            self._observable_type_id_dict[observable_type_id] = self._make_observable_enum_entry(
-                caption, caption, "Object")
+            entry = self._make_observable_enum_entry(caption, description, "Object")
+            self._observable_type_id_dict[observable_type_id] = entry
 
     def _observables_from_item_attributes(
         self,
@@ -921,9 +994,9 @@ class SchemaCompiler:
         is_patch: bool,
     ) -> None:
         if is_patch:
-            caption = self._find_parent_item_caption(items, item_name, item)
+            caption, _ = self._find_parent_item_caption_and_description(items, item_name, item)
         else:
-            caption = self._find_item_caption(items, item_name, item)
+            caption, _ = self._find_item_caption_and_description(items, item_name, item)
         for attribute_name, attribute in item.setdefault("attributes", {}).items():
             if "observable" in attribute:
                 observable_type_id = str(attribute["observable"])
@@ -945,9 +1018,9 @@ class SchemaCompiler:
         # kind should be title-case: "Class" or "Object"
         if "observables" in item:
             if is_patch:
-                caption = self._find_parent_item_caption(items, item_name, item)
+                caption, _ = self._find_parent_item_caption_and_description(items, item_name, item)
             else:
-                caption = self._find_item_caption(items, item_name, item)
+                caption, _ = self._find_item_caption_and_description(items, item_name, item)
             for attribute_path, observable_type_id_num in item["observables"].items():
                 observable_type_id = str(observable_type_id_num)
                 if observable_type_id in self._observable_type_id_dict:
@@ -973,13 +1046,15 @@ class SchemaCompiler:
         }
 
     @staticmethod
-    def _find_item_caption(items: JObject, item_name: str, item: JObject) -> str:
+    def _find_item_caption_and_description(items: JObject, item_name: str, item: JObject) -> tuple[str, str]:
         if "caption" in item:
-            return item["caption"]
-        return SchemaCompiler._find_parent_item_caption(items, item_name, item)
+            caption = item["caption"]
+            description = item.get("description", caption)
+            return caption, description
+        return SchemaCompiler._find_parent_item_caption_and_description(items, item_name, item)
 
     @staticmethod
-    def _find_parent_item_caption(items: JObject, item_name: str, item: JObject) -> str:
+    def _find_parent_item_caption_and_description(items: JObject, item_name: str, item: JObject) -> tuple[str, str]:
         current_item = item
         while True:
             if "extends" in item:
@@ -987,13 +1062,15 @@ class SchemaCompiler:
                 if parent_name in items:
                     parent_item = items[parent_name]
                     if "caption" in parent_item:
-                        return parent_item["caption"]
+                        caption = parent_item["caption"]
+                        description = parent_item.get("description", caption)
+                        return caption, description
                     current_item = parent_item
                 else:
                     raise SchemaException(f'Ancestor "{parent_name}" of "{item_name}" is undefined.')
             else:
                 break
-        return item_name  # fallback
+        return item_name, item_name  # fallback
 
     @staticmethod
     def _add_source_to_item_attributes(items: JObject, kind: str) -> None:
@@ -1084,6 +1161,7 @@ class SchemaCompiler:
 
             if (source_key in dest_attribute
                 and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
+                # TODO: Detect collisions, perhaps with overwrite flag in utils.deep_merge
                 deep_merge(dest_attribute[source_key], source_value)
             else:
                 dest_attribute[source_key] = source_value
@@ -1358,6 +1436,8 @@ class SchemaCompiler:
         self._validate_profiles_and_add_links("class", self._classes)
 
     def _validate_profiles_and_add_links(self, group: str, items: JObject) -> None:
+        # TODO: check attributes
+        # TODO: check profile attributes (but don't add links for profiles)
         for item_name, item in items.items():
             if "profiles" in item:
                 for profile_name in item["profiles"]:
@@ -1577,6 +1657,7 @@ class SchemaCompiler:
                 profiles = item.setdefault("profiles", [])
                 if "datetime" not in profiles:
                     profiles.append("datetime")
+                    profiles.sort()  # keep profiles sorted
 
     def _ensure_attributes_have_requirement(self) -> None:
         # Track attributes in profiles, classes, and objects that incorrectly do _not_ have a "requirement"

@@ -6,7 +6,8 @@ from pathlib import Path
 from sys import stderr
 from time import perf_counter
 
-from compiler import Schema, SchemaCompiler
+from compiler import SchemaCompiler
+from exceptions import SchemaException
 from jsonish import JObject
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ class CustomEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def items_to_legacy(items: JObject) -> JObject:
+def items_to_legacy(items: JObject, kind: str, objects: JObject) -> JObject:
     legacy_items = {}
     for item_name, item in items.items():
         if "extension" in item:
@@ -79,6 +80,7 @@ def main():
         action="store_true",
         default=False,
         help="tolerate common extension errors during schema compilation")
+
     parser.add_argument(
         "-l", "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
@@ -99,9 +101,12 @@ def main():
     logger.info("Schema compilation took %.3f seconds", duration)
 
     # Output in legacy format
-    # TODO: add command line arg to pick output format
-    legacy_classes = items_to_legacy(schema.classes)
-    legacy_objects = items_to_legacy(schema.objects)
+    # TODO: Add command line arg to pick output format.
+    # TODO: Add compiler output format version. Original (legacy) should be 0.
+    # TODO: Add extension information
+    # TODO: Add profile information. Profiles from extensions should be extension scoped.
+    legacy_classes = items_to_legacy(schema.classes, "class", schema.objects)
+    legacy_objects = items_to_legacy(schema.objects, "object", schema.objects)
     dictionary_to_legacy(schema.dictionary)
     output = {
         "base_event": legacy_classes.get("base_event"),
