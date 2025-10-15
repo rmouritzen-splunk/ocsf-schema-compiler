@@ -130,13 +130,14 @@ class SchemaCompiler:
 
         self._enrich_profiles_attributes_from_dictionary()  # TODO: Why are only profile attributes enriched?
         self._validate_object_profiles_and_add_links()
-        self._add_object_links()
+        if self.include_browser_data:
+            self._add_object_links()
         self._update_observable_enum()
-        self._update_linked_object_profiles()
+        self._consolidate_object_profiles()
         self._verify_object_attributes_and_add_datetime()
 
         self._validate_class_profiles_and_add_links()
-        self._update_linked_class_profiles()
+        self._consolidate_class_profiles()
         self._verify_class_attributes_and_add_datetime()
 
         self._ensure_attributes_have_requirement()
@@ -376,7 +377,7 @@ class SchemaCompiler:
         for attribute_name, attribute in attributes.items():
             attribute["profile"] = profile_name
             if annotations:
-                self._add_profile_annotations(annotations, attribute)
+                self._add_attribute_annotations(annotations, attribute)
         self._include_cache[path] = profile
 
     def _enrich_extension_profile(
@@ -390,11 +391,11 @@ class SchemaCompiler:
             attribute["extension"] = extension_name
             attribute["extension_id"] = extension_id
             if annotations:
-                self._add_profile_annotations(annotations, attribute)
+                self._add_attribute_annotations(annotations, attribute)
         self._include_cache[path] = profile
 
     @staticmethod
-    def _add_profile_annotations(annotations: JObject, attribute: JObject) -> None:
+    def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
         for key, value in annotations.items():
             # Only add annotation mappings that do no exist already in annotation
             if key not in attribute:
@@ -537,6 +538,12 @@ class SchemaCompiler:
 
         attributes = deepcopy(include_item["attributes"])
 
+        # But first add in annotations, if any
+        if "annotations" in include_item:
+            annotations = include_item["annotations"]
+            for attribute in attributes.values():
+                self._add_attribute_annotations(annotations, attribute)
+
         # item["attributes"] should exist at this point, so no need to double-check
         # Merge item's attributes on top of the copy of the include attribute, preferring item's data
         SchemaCompiler._merge_attributes(attributes, item["attributes"], context)
@@ -665,8 +672,9 @@ class SchemaCompiler:
         # the observable type_id enumerations will be propagated to all children of event classes.
         self._observables_from_classes()
 
-        self._add_source_to_item_attributes(self._classes, "class")
-        self._add_source_to_patch_item_attributes(self._class_patches, "class")
+        if self.include_browser_data:
+            self._add_source_to_item_attributes(self._classes, "class")
+            self._add_source_to_patch_item_attributes(self._class_patches, "class")
         self._resolve_patches(self._classes, self._class_patches, "class")
         self._resolve_extends(self._classes, "class")
 
@@ -726,8 +734,9 @@ class SchemaCompiler:
                 "caption": f"{cls_caption}: Unknown",
             }
             type_uid_attribute["enum"] = type_uid_enum
-            # TODO: Only add "_source" when self.include_browser_data is True?
-            type_uid_attribute["_source"] = cls_name
+
+            if self.include_browser_data:
+                type_uid_attribute["_source"] = cls_name
 
             # add class_uid and class_name attributes
             cls_uid_attribute = cls_attributes.setdefault("class_uid", {})
@@ -735,8 +744,10 @@ class SchemaCompiler:
             cls_uid_key = str(cls_uid)
             enum = {cls_uid_key: {"caption": cls_caption, "description": cls.get("description", "")}}
             cls_uid_attribute["enum"] = enum
-            # TODO: Only add "_source" when self.include_browser_data is True?
-            cls_uid_attribute["_source"] = cls_name
+
+            if self.include_browser_data:
+                cls_uid_attribute["_source"] = cls_name
+
             cls_name_attribute["description"] = (f"The event class name,"
                                                  f" as defined by class_uid value: <code>{cls_caption}</code>.")
 
@@ -772,8 +783,9 @@ class SchemaCompiler:
         # the observable type_id enumerations will be propagated to all children of objects.
         self._observables_from_objects()
 
-        self._add_source_to_item_attributes(self._objects, "object")
-        self._add_source_to_patch_item_attributes(self._object_patches, "object")
+        if self.include_browser_data:
+            self._add_source_to_item_attributes(self._objects, "object")
+            self._add_source_to_patch_item_attributes(self._object_patches, "object")
         self._resolve_patches(self._objects, self._object_patches, "object")
         self._resolve_extends(self._objects, "object")
 
@@ -952,6 +964,8 @@ class SchemaCompiler:
 
     @staticmethod
     def _make_observable_enum_entry(caption: str, description: str, observable_kind: str) -> JObject:
+        # TODO: Only add "_observable_kind" when self.include_browser_data is True?
+        #       This would require removing use of this in collision exceptions.
         return {
             "caption": caption,
             "description": f"Observable by {observable_kind}.<br>{description}",
@@ -1054,7 +1068,7 @@ class SchemaCompiler:
     def _merge_attribute_detail(dest_attribute: JObject, source_attribute: JObject, context: str) -> None:
         for source_key, source_value in source_attribute.items():
             if source_key == "profile":
-                if source_value is None: # special meaning: don't enable via profile
+                if source_value is None:  # special meaning: don't enable via profile
                     # TODO: delete key. Leave for now to help diffs with Elixir export by being consistent with it.
                     pass
                 else:
@@ -1069,7 +1083,7 @@ class SchemaCompiler:
                                               f' "{source_value}", existing: {dest_attribute}')
 
             if (source_key in dest_attribute
-                  and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
+                and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
                 deep_merge(dest_attribute[source_key], source_value)
             else:
                 dest_attribute[source_key] = source_value
@@ -1144,11 +1158,35 @@ class SchemaCompiler:
                                       f' extends undefined {kind} "{parent_name}"')
 
     def _enrich_and_validate_dictionary(self) -> None:
-        self._add_common_dictionary_attribute_links()
-        self._add_class_dictionary_attribute_links()
-        self._add_object_dictionary_attribute_links()
+        if self.include_browser_data:
+            self._add_common_dictionary_attribute_links()
+            self._add_class_dictionary_attribute_links()
+            self._add_object_dictionary_attribute_links()
         self._enrich_and_validate_dictionary_attribute_types()
         self._add_datetime_sibling_dictionary_attributes()
+
+    def _add_common_dictionary_attribute_links(self) -> None:
+        if not self.include_browser_data:
+            return
+        if "base_event" not in self._classes:
+            raise SchemaException('Schema has not defined a "base_event" class')
+        base_event = self._classes["base_event"]
+        link = self._make_link("common", "base_event", base_event)
+        self._add_links_to_dictionary_attributes("class", "base_event", base_event, link)
+
+    def _add_class_dictionary_attribute_links(self) -> None:
+        if not self.include_browser_data:
+            return
+        for cls_name, cls in self._classes.items():
+            link = self._make_link("class", cls_name, cls)
+            self._add_links_to_dictionary_attributes("class", cls_name, cls, link)
+
+    def _add_object_dictionary_attribute_links(self) -> None:
+        if not self.include_browser_data:
+            return
+        for obj_name, obj in self._objects.items():
+            link = self._make_link("object", obj_name, obj)
+            self._add_links_to_dictionary_attributes("object", obj_name, obj, link)
 
     @staticmethod
     def _make_link(group: str, item_name: str, item: JObject) -> JObject:
@@ -1165,7 +1203,9 @@ class SchemaCompiler:
             link["deprecated?"] = True
         return link
 
-    def _add_link_to_dictionary_attributes(self, kind: str, item_name: str, item: JObject, link: JObject) -> None:
+    def _add_links_to_dictionary_attributes(self, kind: str, item_name: str, item: JObject, link: JObject) -> None:
+        if not self.include_browser_data:
+            return
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         item_attributes = item.setdefault("attributes", {})
         for item_attribute_name, item_attribute in item_attributes.items():
@@ -1183,23 +1223,6 @@ class SchemaCompiler:
             else:
                 raise SchemaException(f'{kind} "{item_name}" uses undefined attribute "{item_attribute_name}"')
 
-    def _add_common_dictionary_attribute_links(self) -> None:
-        if "base_event" not in self._classes:
-            raise SchemaException('Schema has not defined a "base_event" class')
-        base_event = self._classes["base_event"]
-        link = self._make_link("common", "base_event", base_event)
-        self._add_link_to_dictionary_attributes("class", "base_event", base_event, link)
-
-    def _add_class_dictionary_attribute_links(self) -> None:
-        for cls_name, cls in self._classes.items():
-            link = self._make_link("class", cls_name, cls)
-            self._add_link_to_dictionary_attributes("class", cls_name, cls, link)
-
-    def _add_object_dictionary_attribute_links(self) -> None:
-        for obj_name, obj in self._objects.items():
-            link = self._make_link("object", obj_name, obj)
-            self._add_link_to_dictionary_attributes("object", obj_name, obj, link)
-
     def _enrich_and_validate_dictionary_attribute_types(self) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         dictionary_types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
@@ -1216,9 +1239,8 @@ class SchemaCompiler:
                 # Object dictionary type
                 # Add "object_name" to attribute details based on caption.
                 # NOTE: This must be done after resolving patches and extends so caption is resolved.
-                # TODO: self._enrich_dictionary_object_types() transforms original object attribute type to
-                #       "object_t" and sets "object_type". Why not do both at this point?
-                #       After everything it working, change the approach and make sure the end result is the same.
+                # TODO: self._enrich_dictionary_object_types() also sets "object_name", which seems unnecessary and
+                #       too early anyway.
                 object_type = attribute["object_type"]
                 if object_type in self._objects:
                     obj = self._objects[object_type]
@@ -1355,11 +1377,15 @@ class SchemaCompiler:
                             description = f'{group} "{item_name}"'
                         raise SchemaException(f'{description} uses undefined profile "{profile_name}"')
 
-                    link = self._make_link(group, item_name, item)
-                    links = profile.get("_links", [])
-                    links.append(link)
+                    if self.include_browser_data:
+                        link = self._make_link(group, item_name, item)
+                        links = profile.get("_links", [])
+                        links.append(link)
 
     def _add_object_links(self) -> None:
+        if not self.include_browser_data:
+            return
+
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         for obj_name, obj in self._objects.items():
             links = []
@@ -1396,19 +1422,119 @@ class SchemaCompiler:
                 else:
                     dest_enum_dict[source_type_id_key] = source_enum_detail
 
-    def _update_linked_object_profiles(self) -> None:
-        self._update_linked_item_profiles("object", self._objects)
+    def _consolidate_object_profiles(self) -> None:
+        """Update object profiles to includes profiles from all attributes with object types."""
+        self._consolidate_profiles("object", self._objects)
 
-    def _update_linked_class_profiles(self) -> None:
-        self._update_linked_item_profiles("class", self._classes)
+    def _consolidate_class_profiles(self) -> None:
+        """Update class profiles to includes profiles from all attributes with object types."""
+        self._consolidate_profiles("class", self._classes)
 
-    def _update_linked_item_profiles(self, group: str, items: JObject) -> None:
-        for obj in self._objects.values():
-            if "profiles" in obj and "_links" in obj:
-                for link in obj["_links"]:
-                    if link["group"] == group:
-                        item = items[link["type"]]
-                        self._merge_profiles(item, obj)
+    # TODO: Flat implementation based on _links. (This code changes to always create _links.)
+    #       NOTE: This implementation does NOT work for all cases. Elixir code has (had) the same issue.
+    # def _consolidate_profiles(self, group: str, items: JObject) -> None:
+    #     for obj in self._objects.values():
+    #         if "profiles" in obj and "_links" in obj:
+    #             for link in obj["_links"]:
+    #                 if link["group"] == group:
+    #                     item = items[link["type"]]
+    #                     self._merge_profiles(item, obj)
+
+    # TODO: Recursive implementation
+    def _consolidate_profiles(self, group: str, items: JObject) -> None:
+        for item_name, item in items.items():
+            profiles_dict: dict[str, Optional[list[str]]] = {}
+            try:
+                if group == "class":
+                    # The recursive step is for objects. For classes, we need to do the first step here.
+                    if "profiles" in item:
+                        # Need to tweak ke for class so it does not collide with object names
+                        profiles_dict[f'class:{item_name}'] = item["profiles"]
+
+                    for attribute_name, attribute in item.setdefault("attributes", {}).items():
+                        # This happens before enriching attributes with dictionary information,
+                        # so we need to do extra work to determine actual type
+                        object_type = self._find_object_type(attribute_name, attribute)
+                        if object_type:
+                            self._gather_profiles(object_type, profiles_dict)
+
+                else:
+                    # for object, we can jump straight to _gather_profiles
+                    self._gather_profiles(item_name, profiles_dict)
+            except SchemaException as e:
+                raise SchemaException(f'Consolidating profiles of {group} "{item_name}" failed: {e}') from e
+
+            all_profiles: set[str] = set()
+            for profile_list in profiles_dict.values():
+                if profile_list:
+                    all_profiles.update(profile_list)
+
+            if all_profiles:
+                sorted_profiles = sorted(all_profiles)
+                if logger.isEnabledFor(logging.DEBUG):
+                    items_with_profiles = []
+                    for n, l in profiles_dict.items():
+                        if l:
+                            items_with_profiles.append(n)
+                    items_with_profiles.sort()
+                    original_profiles = item.get("profiles")
+                    if sorted_profiles == original_profiles:
+                        logger.debug('Consolidated profiles of %s "%s": profiles unchanged.', group, item_name)
+                    else:
+                        logger.debug(f'Consolidated profiles of %s "%s".'
+                                     f'\n    Original profiles: %s.'
+                                     f'\n    Consolidated from: %s.'
+                                     f'\n    Consolidated profiles: %s.',
+                                     group, item_name, original_profiles, items_with_profiles, sorted_profiles)
+                item["profiles"] = sorted_profiles
+            else:
+                logger.debug('Consolidated profiles of %s "%s": no profiles.', group, item_name)
+
+    def _gather_profiles(self, obj_name: str, profiles_dict: dict[str, list[str]]) -> None:
+        """Gather profiles from obj_name object (if any) and its attributes that are object types, recursively."""
+        if obj_name in profiles_dict:
+            return  # obj_name already processed
+
+        if obj_name not in self._objects:
+            raise SchemaException(f'object "{obj_name}" is not defined')
+        obj = self._objects[obj_name]
+
+        # We specifically want actual and None values since profiles_dict is doing both gathering profiles
+        # and marking objects that have been processed.
+        profiles_dict[obj_name] = obj.get("profiles")
+
+        for attribute_name, attribute in obj.setdefault("attributes", {}).items():
+            object_type = self._find_object_type(attribute_name, attribute)
+            if object_type:
+                self._gather_profiles(object_type, profiles_dict)
+
+    def _find_object_type(self, attribute_name, attribute: JObject) -> Optional[str]:
+        """
+        Determine object type of unprocessed object or class attribute
+        (an attribute not yet merged with dictionary attribute information).
+        Returns None is if attribute is not an object type (it's a dictionary type).
+        """
+        # We haven't merged dictionary attributes on to class and object attributes yet,
+        # so "object_type" should not yet be present.
+        # The logic in this method depends on the unprocessed "type",
+        # and will not work if "type" has already been changed to "object_t" and "object_type" added for object types.
+        assert "object_type" not in attribute, \
+            f'Object attribute "{attribute_name}" unexpectedly already has "object_type"'
+
+        if "type" in attribute:
+            # The class or object defines the type. This occurs sometimes when type is refined in a specific case.
+            # These types should only ever be dictionary types
+            assert attribute["type"] in self._dictionary.setdefault("types").setdefault("attributes", {}), \
+                f'Object attribute "{attribute_name}" should be a defined dictionary type'
+            return None
+
+        dictionary_attributes = self._dictionary.setdefault("attributes", {})
+        if attribute_name not in dictionary_attributes:
+            raise SchemaException(f'attribute "{attribute_name}" is not a defined dictionary attributes')
+        dictionary_attribute = dictionary_attributes[attribute_name]
+        if "object_type" in dictionary_attribute:
+            return dictionary_attribute["object_type"]
+        return None
 
     def _verify_object_attributes_and_add_datetime(self) -> None:
         self._verify_item_attributes_and_add_datetime(self._objects, "object")
@@ -1522,7 +1648,7 @@ class SchemaCompiler:
 
         if not sibling_of_dict:
             # no enum attributes present in attributes, so nothing to do
-            return # skip iterating attributes again uselessly
+            return  # skip iterating attributes again uselessly
 
         # Second pass, look for enum attributes and add "_sibling_of" mapping
         for attribute_name, attribute in attributes.items():
@@ -1550,4 +1676,3 @@ class SchemaCompiler:
         for key in keys_to_delete:
             del obj[key]
             deleted_keys.add(key)
-
