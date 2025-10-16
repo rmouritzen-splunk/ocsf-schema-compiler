@@ -1,4 +1,3 @@
-import dataclasses
 import json
 import logging
 from argparse import ArgumentParser
@@ -10,13 +9,6 @@ from compiler import SchemaCompiler
 from jsonish import JObject
 
 logger = logging.getLogger(__name__)
-
-
-class CustomEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if dataclasses.is_dataclass(obj):
-            return dataclasses.asdict(obj)
-        return super().default(obj)
 
 
 def fix_name(name: str, item: JObject) -> str:
@@ -107,9 +99,19 @@ def main():
 
     # Output in legacy format
     # TODO: Add command line arg to pick output format.
-    # TODO: Add compiler output format version. Original (legacy) should be 0.
+    # TODO: Add compiler output format versions.
+    #       0 - Original (legacy) layout with extension scoped keys names.
+    #           Due to quirks in original implementation, some dictionary attribute keys will become extension scoped
+    #           while original was not.
+    #       1 - Original (legacy) layout with only extension profiles using scoped key names.
+    #       2 - Modern layout. Only extension profiles use scoped key names.
     # TODO: Add extension information
     # TODO: Add profile information. Profiles from extensions should be extension scoped.
+    # TODO: Move legacy conversion to SchemaCompiler, or at least out of here.
+    #       If in SchemaCompiler, we'd need to return JObject.
+    #       Otherwise we'd need to add a helper function, which would be awkward since the compiled output version
+    #       affects data buried inside various objects.
+    # This is would be output version 1
     # output = {
     #     "base_event": schema.classes.get("base_event"),
     #     "classes": schema.classes,
@@ -118,6 +120,7 @@ def main():
     #     "types": schema.dictionary.get("types", {}).get("attributes"),
     #     "version": schema.version
     # }
+    # This is output version 0
     legacy_classes = items_to_legacy(schema.classes, schema.objects)
     legacy_objects = items_to_legacy(schema.objects, schema.objects)
     dictionary_to_legacy(schema.dictionary, schema.objects)
@@ -130,12 +133,6 @@ def main():
         "version": schema.version
     }
     print(json.dumps(output))
-
-    # TODO: debugging friendly version:
-    # print(json.dumps(schema, cls=CustomEncoder, indent=2, sort_keys=True))
-    # print(json.dumps(schema.classes["registry_value_activity"], cls=CustomEncoder, indent=2, sort_keys=True))
-    # print(json.dumps(schema.objects["process"], cls=CustomEncoder, indent=2, sort_keys=True))
-    # print(json.dumps(schema.dictionary, cls=CustomEncoder, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':

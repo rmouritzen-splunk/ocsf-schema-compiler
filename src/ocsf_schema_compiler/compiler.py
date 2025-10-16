@@ -182,11 +182,15 @@ class SchemaCompiler:
         Some forms of errors can be tolerated but should be fixed. These mainly occur with schema extensions that are
         not routinely validated against the OCSF metaschema.
         """
-        # TODO: Remove all of this tolerable error stuff after the "splunk" extension is fixed
+        # TODO: Remove all of this tolerable error stuff after the splunk extension is fixed
         if self.tolerate_errors:
             self._error_count += 1
-            logger.error("Schema error: %s", str(exception))
+            logger.error("Schema error (tolerated): %s", str(exception))
         else:
+            logger.error("Failing with schema error: %s", str(exception))
+            logger.error("Note: this error can be tolerated (skipped) with the tolerate error option:"
+                         " -t/--tolerate-errors when using command line;"
+                         " tolerate_errors flag when using SchemaCompiler.")
             raise exception
 
     def _warning(self, message: str, *args, **kwargs) -> None:
@@ -648,10 +652,9 @@ class SchemaCompiler:
             raise SchemaException(f"{context} file does not exist: {include_path}") from e
 
     def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
-        categories_attributes = self._categories.setdefault("attributes", {})
         for extension in extensions:
-            ext_categories_attributes = extension.categories.setdefault("attributes", {})
-            deep_merge(categories_attributes, ext_categories_attributes)
+            self._merge_extension_attributes_with_overwrite(extension,
+                                                            self._categories, extension.categories, "category")
 
     def _merge_classes_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -664,17 +667,9 @@ class SchemaCompiler:
                 self._merge_extension_items(extension.name, extension.objects, self._objects, "object")
 
     def _merge_dictionary_from_extensions(self, extensions: list[Extension]) -> None:
-        dictionary_attributes = self._dictionary.setdefault("attributes", {})
-        dictionary_types = self._dictionary.setdefault("types", {})
-        dictionary_types_attributes = dictionary_types.setdefault("attributes", {})
-
         for extension in extensions:
-            ext_dictionary_attributes = extension.dictionary.setdefault("attributes", {})
-            deep_merge(dictionary_attributes, ext_dictionary_attributes)
-
-            ext_dictionary_types = extension.dictionary.setdefault("types", {})
-            ext_dictionary_types_attributes = ext_dictionary_types.setdefault("attributes", {})
-            deep_merge(dictionary_types_attributes, ext_dictionary_types_attributes)
+            self._merge_extension_attributes_with_overwrite(extension,
+                                                            self._dictionary, extension.dictionary, "dictionary")
 
     def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
         # TODO: Should extension profiles be extension scoped?
@@ -701,6 +696,77 @@ class SchemaCompiler:
                             f' with caption "{other_profile.get("caption", "")}"')
                     else:
                         self._extension_scoped_profiles[scoped_name] = profile
+
+    def _merge_extension_attributes_with_overwrite(
+        self, extension: Extension, base_item: JObject, extension_item: JObject, kind: str
+    ) -> None:
+        """
+        Merge attributes from extension_item into base_item, preferring base_item's information.
+        This is used for extension category and dictionary merging.
+
+        For an attribute that exists in extension_item but not base_item, the attribute is simply added.
+        For an attribute that exists in both the extension_item and base_item, the attribute is shallowly merged
+        if the extension attribute has an "overwrite" property with a value of true, otherwise the base attribute
+        is left unchanged.
+
+        Also merge extension item's type attributes into base_item's type attributes. This is specific to the
+        dictionary. In this case, each extension_item type attributes is deeply merged into the base_item's type
+        attributes, thus preferring the extension's information.
+        """
+        base_attributes = base_item.setdefault("attributes", {})
+        for ext_attribute_name, ext_attribute in extension_item.get("attributes", {}).items():
+            if ext_attribute.get("overwrite"):
+                del ext_attribute["overwrite"]  # don't propagate the overwrite flag
+                base_attribute = base_item.get(ext_attribute_name)
+                if base_attribute:
+                    if "extension" in base_attribute:
+                        raise SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
+                                              f' is trying to overwrite attribute from extension'
+                                              f' "{base_attribute["extension"]}"; the schema compile does not handle'
+                                              f' extensions modifying each other')
+                    ext_attribute["extension"] = extension.name
+                    ext_attribute["extension_id"] = extension.uid
+                    # Shallowly merge, preferring ext_attribute keys
+                    base_attribute.update(ext_attribute)
+                else:
+                    ext_attribute["extension"] = extension.name
+                    ext_attribute["extension_id"] = extension.uid
+                    base_attributes[ext_attribute_name] = ext_attribute
+            else:
+                base_attribute = base_attributes.get(ext_attribute_name)
+                if base_attribute:
+                    # Elixir code avoid collision by adding attribute with extension scope.
+                    # But these attributes exist in a flat namespace, adding as scoped would require the extensive
+                    # and weird scoped extension name logic from the original Elixir schema compiler. And worse,
+                    # the result is both hard to reason about and looks weird in the schema browser.
+                    # TODO: This should be fixed in splunk extension. This case should only raise an exception.
+                    self._tolerable_error(
+                        SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
+                                        f' does not have "overwrite" property and collides with existing attribute'))
+                    self._warning('Tolerating error by treating extension "%s" %s attribute "%s"'
+                                  ' as if it had "overwrite" property of true',
+                                  extension.name, kind, ext_attribute_name)
+
+                    if "extension" in base_attribute:
+                        raise SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
+                                              f' is trying to do a tolerated overwrite of attribute from extension'
+                                              f' "{base_attribute["extension"]}"; the schema compile does not handle'
+                                              f' extensions modifying each other')
+
+                    ext_attribute["extension"] = extension.name
+                    ext_attribute["extension_id"] = extension.uid
+                    # Shallowly merge, preferring ext_attribute keys
+                    base_attribute.update(ext_attribute)
+                else:
+                    ext_attribute["extension"] = extension.name
+                    ext_attribute["extension_id"] = extension.uid
+                    base_attributes[ext_attribute_name] = ext_attribute
+
+        # For the dictionary case, merge the types form the extension into the base
+        if "types" in extension_item:
+            base_types_attributes = base_item.setdefault("types", {}).setdefault("attributes", {})
+            extension_types_attributes = extension_item["types"].setdefault("attributes", {})
+            deep_merge(base_types_attributes, extension_types_attributes)
 
     @staticmethod
     def _merge_extension_items(extension_name: str, extension_items: JObject, items: JObject, kind: str) -> None:
@@ -1422,8 +1488,8 @@ class SchemaCompiler:
                     del profile_attribute["profile"]
                 else:
                     # TODO: This is an actual error that the Elixir compile hid via a weird hack.
-                    #       The "splunk" extension has several instances of this problem.
-                    #       These errors must either be fixed, or this compile needs to replicate the hack from Elixir.
+                    #       This occurs in the splunk extension in its unused splunk profile.
+                    #       The splunk/splunk profile should simply be removed.
                     if "extension" in profile:
                         source = f'extension "{profile["extension"]}" profile "{profile_name}"'
                     else:
@@ -1703,8 +1769,9 @@ class SchemaCompiler:
                     deep_merge(new_attribute, attribute)
                     new_attributes[attribute_name] = new_attribute
                 else:
-                    # TODO: This is an identical error as found in _enrich_profiles_attributes_from_dictionary
-                    #       and occurs with the current "splunk" extension.
+                    # TODO: This the same error found in _enrich_profiles_attributes_from_dictionary
+                    #       This occurs in the splunk extension in its unused splunk profile.
+                    #       The splunk/splunk profile should simply be removed.
                     if "extension" in item:
                         actual_kind = f'extension "{item["extension"]}" {kind}'
                     else:
