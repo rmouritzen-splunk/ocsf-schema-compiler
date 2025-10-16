@@ -7,7 +7,6 @@ from sys import stderr
 from time import perf_counter
 
 from compiler import SchemaCompiler
-from exceptions import SchemaException
 from jsonish import JObject
 
 logger = logging.getLogger(__name__)
@@ -20,30 +19,36 @@ class CustomEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def items_to_legacy(items: JObject, kind: str, objects: JObject) -> JObject:
+def fix_name(name: str, item: JObject) -> str:
+    if "extension" in item:
+        return f'{item["extension"]}/{name}'
+    return name
+
+
+def fix_attribute_object_type(attribute: JObject, objects: JObject) -> None:
+    if "object_type" in attribute:
+        obj_name = attribute["object_type"]
+        if obj_name in objects:
+            obj = objects[obj_name]
+            if "extension" in obj:
+                attribute["object_type"] = f'{obj["extension"]}/{attribute["object_type"]}'
+
+
+def items_to_legacy(items: JObject, objects: JObject) -> JObject:
     legacy_items = {}
     for item_name, item in items.items():
-        if "extension" in item:
-            legacy_items[f'{item["extension"]}/{item_name}'] = item
-        else:
-            legacy_items[item_name] = item
+        legacy_items[fix_name(item_name, item)] = item
         if "attributes" in item:
             for attribute_name, attribute in item["attributes"].items():
-                if "extension" in attribute and "object_type" in attribute:
-                    attribute["object_type"] = f'{attribute["extension"]}/{attribute["object_type"]}'
+                fix_attribute_object_type(attribute, objects)
     return legacy_items
 
 
-def dictionary_to_legacy(dictionary: dict) -> None:
+def dictionary_to_legacy(dictionary: dict, objects: JObject) -> None:
     legacy_attributes = {}
     for attribute_name, attribute in dictionary["attributes"].items():
-        if "extension" in attribute:
-            extension = attribute["extension"]
-            if "object_type" in attribute:
-                attribute["object_type"] = f'{extension}/{attribute["object_type"]}'
-            legacy_attributes[f'{extension}/{attribute_name}'] = attribute
-        else:
-            legacy_attributes[attribute_name] = attribute
+        fix_attribute_object_type(attribute, objects)
+        legacy_attributes[fix_name(attribute_name, attribute)] = attribute
     dictionary["attributes"] = legacy_attributes
 
 
@@ -105,9 +110,17 @@ def main():
     # TODO: Add compiler output format version. Original (legacy) should be 0.
     # TODO: Add extension information
     # TODO: Add profile information. Profiles from extensions should be extension scoped.
-    legacy_classes = items_to_legacy(schema.classes, "class", schema.objects)
-    legacy_objects = items_to_legacy(schema.objects, "object", schema.objects)
-    dictionary_to_legacy(schema.dictionary)
+    # output = {
+    #     "base_event": schema.classes.get("base_event"),
+    #     "classes": schema.classes,
+    #     "objects": schema.objects,
+    #     "dictionary_attributes": schema.dictionary.get("attributes"),
+    #     "types": schema.dictionary.get("types", {}).get("attributes"),
+    #     "version": schema.version
+    # }
+    legacy_classes = items_to_legacy(schema.classes, schema.objects)
+    legacy_objects = items_to_legacy(schema.objects, schema.objects)
+    dictionary_to_legacy(schema.dictionary, schema.objects)
     output = {
         "base_event": legacy_classes.get("base_event"),
         "classes": legacy_classes,

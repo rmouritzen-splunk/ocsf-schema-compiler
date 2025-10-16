@@ -1108,17 +1108,20 @@ class SchemaCompiler:
         for patch_name, patch_list in patches.items():
             for patch in patch_list:
                 base_name = patch["extends"]  # this will be the same as patch_name
-                assert patch_name == base_name, "Patch name should match extends base name"
-                context = f'extension "{patch.get("extension", "<unknown>")}" {kind} patch "{patch_name}"'
+                assert patch_name == base_name, \
+                    f'Patch name "{patch_name}" should match extends base name "{base_name}"'
+
+                context = f'extension "{patch["extension"]}" {kind} patch "{patch_name}"'
                 logger.info('%s is patching "%s"', context, base_name)
+
                 if base_name not in items:
                     raise SchemaException(f'{context} attempted to patch undefined {kind} "{base_name}"')
+
                 base = items[base_name]
+
                 SchemaCompiler._merge_profiles(base, patch)
-
-                SchemaCompiler._merge_attributes(
-                    base.setdefault("attributes", {}), patch.setdefault("attributes", {}), context)
-
+                SchemaCompiler._merge_attributes(base.setdefault("attributes", {}),
+                                                 patch.setdefault("attributes", {}), context)
                 # Top-level observable.
                 # Only occurs in objects, but is safe to do for classes too.
                 put_non_none(base, "observable", patch.get("observable"))
