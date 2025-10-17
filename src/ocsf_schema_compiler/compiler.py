@@ -12,7 +12,8 @@ from jsonish import (
 from utils import (
     deep_merge, put_non_none,
     is_hidden_class, is_hidden_object,
-    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid
+    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid,
+    add_extension_scope_to_items, add_extension_scope_to_dictionary
 )
 
 logger = logging.getLogger(__name__)
@@ -21,13 +22,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Schema:
     version: str
-    categories: JObject  # needed for browser UI
+    categories: JObject
     classes: JObject
     objects: JObject
-    dictionary: JObject  # needed for browser UI
-    profiles: JObject  # needed for browser UI
-    extensions: JObject  # needed for browser UI
-    # TODO: add all_classes and all_objects for browser UI
+    dictionary: JObject
+    profiles: JObject
+    extensions: JObject
 
 
 @dataclass
@@ -61,12 +61,14 @@ class SchemaCompiler:
         ignore_platform_extensions: bool,
         extensions_paths: Optional[list[Path]],
         include_browser_data: bool = False,
+        scope_extension_keys: bool = False,
         tolerate_errors: bool = False,
     ) -> None:
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
         self.extensions_paths: Optional[list[Path]] = extensions_paths
         self.include_browser_data: bool = include_browser_data
+        self.scope_extension_keys: bool = scope_extension_keys
         self.tolerate_errors: bool = tolerate_errors
 
         logger.info("Schema path: %s", self.schema_path)
@@ -78,8 +80,23 @@ class SchemaCompiler:
             logger.info("Including extensions path(s): %s", ", ".join(list(map(str, self.extensions_paths))))
         if self.include_browser_data:
             logger.info("Including extra information needed by the schema browser (the OCSF Server)")
-        else:
-            logger.info("Not including extra information needed by the schema browser (the OCSF Server)")
+        if self.scope_extension_keys:
+            # TODO: do we want to mention that profile names are always extension scoped?
+            # TODO: This whole extension scoping thing is a mess. Can we simply avoid it?
+            logger.info('Adding extension scoped keys for things added or modified by an extension, other than'
+                        ' patched classes and objects. This does not yield a compiled schema that is functionally'
+                        ' different.'
+                        ' Note that extension profile names are always scoped by extension.'
+                        ' WARNING. This option does does not yield the same same result as the the original compiler'
+                        ' schema browser implementation with regard to dictionary and category attributes.'
+                        ' The old implementation would retain existing attribute keys along with any with same unscoped'
+                        ' name, resulting multiple variations of the same attribute. It would then use some byzantine'
+                        ' logic to decide which to use. It would also not add an extension scoped names for attributes'
+                        ' using an "overwrite" property. This is all hard to reason about.'
+                        ' This option simply transforms keys consistently in an effort to end up with the same result.'
+                        ' This option, however, does yield the same output for base OCSF schemas from 1.0.0-rc.3'
+                        ' onward, including their platform extensions, and 1.0.0-rc.2 without its dev extension'
+                        ' (which fails to compile due to name collisions anyway).')
 
         self._is_compiled: bool = False
         self._error_count: int = 0
@@ -106,7 +123,7 @@ class SchemaCompiler:
         # Slice of objects before removing "hidden" / abstract objects
         self._all_objects: JObject = {}
 
-    def compile(self) -> Schema:
+    def compile(self) -> JObject:
         if self._is_compiled:
             raise SchemaException("Schema already compiled (compile can only be run once)")
         self._is_compiled = True
@@ -146,15 +163,37 @@ class SchemaCompiler:
 
         self._finish_attributes()
 
-        if not self.include_browser_data:
-            self._delete_browser_data()
-
-        # TODO: Double-check compiled schema: diff against Elixir-generated schema
-        # TODO: Handle include_browser_data. Probably strip keys with leading underscores
-        #       (as opposed to skipping adding browser information, which would skip some validation checks).
         # TODO: Support item attributes affected by more than one profile / extension.
         #       See _merge_attribute_detail.
         # TODO: Reevaluate uses of "_source" and "_source_patched". Some may not be used in schema browser.
+
+        if not self.include_browser_data:
+            # TODO: Only _observable_kind is left. See if we can remove it as we go.
+            self._delete_browser_data()
+
+        if self.scope_extension_keys:
+            classes = add_extension_scope_to_items(self._classes, self._objects)
+            objects = add_extension_scope_to_items(self._objects, self._objects)
+            add_extension_scope_to_dictionary(self._dictionary, self._objects)
+        else:
+            classes = self._classes
+            objects = self._objects
+
+        output = {
+            "base_event": classes.get("base_event"),
+            "classes": classes,
+            "objects": objects,
+            "dictionary_attributes": self._dictionary.get("attributes"),
+            "types": self._dictionary.get("types", {}).get("attributes"),
+            "version": self._version
+        }
+
+        if self.include_browser_data:
+            output["categories"] = self._categories
+            output["extensions"] = extensions
+            output["profiles"] = self._profiles
+            output["all_classes"] = self._all_classes
+            output["all_objects"] = self._all_objects
 
         if self._error_count and self._warning_count:
             logger.error("Compile completed with %d error(s) and %d warning(s)", self._error_count, self._warning_count)
@@ -165,15 +204,7 @@ class SchemaCompiler:
         else:
             logger.info("Compile completed successfully")
 
-        return Schema(
-            version=self._version,
-            categories=self._categories,
-            classes=self._classes,
-            objects=self._objects,
-            dictionary=self._dictionary,
-            profiles=self._profiles,
-            extensions=extensions,
-        )
+        return output
 
     def _tolerable_error(self, exception: SchemaException) -> None:
         """
@@ -682,7 +713,6 @@ class SchemaCompiler:
                 self._merge_extension_items(extension.name, extension.profiles, self._profiles, "profile")
                 # Also merge with extension scoped profiles dictionary
                 for profile_name, profile in extension.profiles.items():
-                    # TODO
                     if "/" in profile_name:
                         raise SchemaException(
                             f'Unexpected scoped profile in "{extension.name}" profile "{profile_name}"')
@@ -774,12 +804,12 @@ class SchemaCompiler:
             if ext_item_name in items:
                 item = items[ext_item_name]
                 if "extension" in item:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} with name "{ext_item_name}"'
-                                          f' collides with extension "{item["extension"]}" {kind}'
+                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_name}" collides'
+                                          f' with extension "{item["extension"]}" {kind}'
                                           f' with caption "{item.get("caption", "")}"')
                 else:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} with name "{ext_item_name}"'
-                                          f' collides with base schema {kind} with caption "{item.get("caption", "")}"')
+                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_name}" collides'
+                                          f' with base schema {kind} with caption "{item.get("caption", "")}"')
             items[ext_item_name] = ext_item
 
     def _consolidate_extension_patches(self, extensions: list[Extension]) -> None:
@@ -911,10 +941,8 @@ class SchemaCompiler:
                     logger.info('Class "%s" uses special undefined category "other"', cls_name)
                     cls["category_uid"] = 0
                 elif category_key is None:
-                    # TODO: self._warning('Class "%s" has no category', cls_name)
                     raise SchemaException(f'Class "{cls_name}" has no category')
                 else:
-                    # TODO: self._warning('Class "%s" has undefined category "%s"', cls_name, category_key)
                     raise SchemaException(f'Class "{cls_name}" has undefined category "{category_key}"')
 
     def _process_objects(self) -> None:

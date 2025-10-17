@@ -6,42 +6,8 @@ from sys import stderr
 from time import perf_counter
 
 from compiler import SchemaCompiler
-from jsonish import JObject
 
 logger = logging.getLogger(__name__)
-
-
-def fix_name(name: str, item: JObject) -> str:
-    if "extension" in item:
-        return f'{item["extension"]}/{name}'
-    return name
-
-
-def fix_attribute_object_type(attribute: JObject, objects: JObject) -> None:
-    if "object_type" in attribute:
-        obj_name = attribute["object_type"]
-        if obj_name in objects:
-            obj = objects[obj_name]
-            if "extension" in obj:
-                attribute["object_type"] = f'{obj["extension"]}/{attribute["object_type"]}'
-
-
-def items_to_legacy(items: JObject, objects: JObject) -> JObject:
-    legacy_items = {}
-    for item_name, item in items.items():
-        legacy_items[fix_name(item_name, item)] = item
-        if "attributes" in item:
-            for attribute_name, attribute in item["attributes"].items():
-                fix_attribute_object_type(attribute, objects)
-    return legacy_items
-
-
-def dictionary_to_legacy(dictionary: dict, objects: JObject) -> None:
-    legacy_attributes = {}
-    for attribute_name, attribute in dictionary["attributes"].items():
-        fix_attribute_object_type(attribute, objects)
-        legacy_attributes[fix_name(attribute_name, attribute)] = attribute
-    dictionary["attributes"] = legacy_attributes
 
 
 def main():
@@ -73,11 +39,15 @@ def main():
         default=False,
         help="include extra data needed by the schema browser (the OCSF Server)")
     parser.add_argument(
+        "-s", "--scope-extension-keys",
+        action="store_true",
+        default=False,
+        help="scope extension keys (default: %(default)s)")
+    parser.add_argument(
         "-t", "--tolerate-errors",
         action="store_true",
         default=False,
         help="tolerate common extension errors during schema compilation")
-
     parser.add_argument(
         "-l", "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
@@ -91,47 +61,12 @@ def main():
     start_seconds = perf_counter()
 
     compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
-                              args.include_browser_data, args.tolerate_errors)
-    schema = compiler.compile()
+                              args.include_browser_data, args.scope_extension_keys, args.tolerate_errors)
+    output = compiler.compile()
 
     duration = perf_counter() - start_seconds
     logger.info("Schema compilation took %.3f seconds", duration)
 
-    # Output in legacy format
-    # TODO: Add command line arg to pick output format.
-    # TODO: Add compiler output format versions.
-    #       0 - Original (legacy) layout with extension scoped keys names.
-    #           Due to quirks in original implementation, some dictionary attribute keys will become extension scoped
-    #           while original was not.
-    #       1 - Original (legacy) layout with only extension profiles using scoped key names.
-    #       2 - Modern layout. Only extension profiles use scoped key names.
-    # TODO: Add extension information
-    # TODO: Add profile information. Profiles from extensions should be extension scoped.
-    # TODO: Move legacy conversion to SchemaCompiler, or at least out of here.
-    #       If in SchemaCompiler, we'd need to return JObject.
-    #       Otherwise we'd need to add a helper function, which would be awkward since the compiled output version
-    #       affects data buried inside various objects.
-    # This is would be output version 1
-    # output = {
-    #     "base_event": schema.classes.get("base_event"),
-    #     "classes": schema.classes,
-    #     "objects": schema.objects,
-    #     "dictionary_attributes": schema.dictionary.get("attributes"),
-    #     "types": schema.dictionary.get("types", {}).get("attributes"),
-    #     "version": schema.version
-    # }
-    # This is output version 0
-    legacy_classes = items_to_legacy(schema.classes, schema.objects)
-    legacy_objects = items_to_legacy(schema.objects, schema.objects)
-    dictionary_to_legacy(schema.dictionary, schema.objects)
-    output = {
-        "base_event": legacy_classes.get("base_event"),
-        "classes": legacy_classes,
-        "objects": legacy_objects,
-        "dictionary_attributes": schema.dictionary.get("attributes"),
-        "types": schema.dictionary.get("types", {}).get("attributes"),
-        "version": schema.version
-    }
     print(json.dumps(output))
 
 
