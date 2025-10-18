@@ -25,7 +25,8 @@ def main():
         "-i", "--ignore-platform-extensions",
         action="store_true",
         default=False,
-        help="ignore platform extensions (if any); these are in an extensions directory under the schema directory")
+        help="ignore platform extensions (if any); these are in an extensions directory under the schema directory;"
+             " default: %(default)s")
     parser.add_argument(
         "-e", "--extensions-path",
         action="append",
@@ -33,35 +34,43 @@ def main():
         metavar="PATH",
         dest="extensions_paths",
         help="optional path to a directory containing one or more OCSF schema extensions; can be repeated")
-    parser.add_argument(
-        "-b", "--include-browser-data",
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "-b", "--browser-mode",
         action="store_true",
         default=False,
-        help="include extra data needed by the schema browser (the OCSF Server)")
+        help="include extra information needed by the schema browser (the OCSF Server);"
+             " ; cannot be used with -l/--legacy-mode; default: %(default)s")
+    group.add_argument(
+        "-l", "--legacy-mode",
+        action="store_true",
+        default=False,
+        help="output schema in legacy export schema layout; cannot be used with -b/--browser-mode;"
+             " default: %(default)s")
     parser.add_argument(
         "-s", "--scope-extension-keys",
         action="store_true",
         default=False,
-        help="scope extension keys (default: %(default)s)")
+        help="scope extension keys; typically used with -l/--legacy-mode; default: %(default)s")
     parser.add_argument(
         "-t", "--tolerate-errors",
         action="store_true",
         default=False,
-        help="tolerate common extension errors during schema compilation")
+        help="tolerate common extension errors during schema compilation; default: %(default)s")
     parser.add_argument(
-        "-l", "--log-level",
+        "-v", "--verbosity",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="INFO",
-        help="log level (default: %(default)s); logs are written to standard error")
+        help="logging verbosity as log level; logs are written to standard error; default: %(default)s")
 
     args = parser.parse_args()
 
-    logging.basicConfig(format="%(levelname)s: %(message)s", style="%", stream=stderr, level=args.log_level)
+    logging.basicConfig(format="%(levelname)s: %(message)s", style="%", stream=stderr, level=args.verbosity)
 
     start_seconds = perf_counter()
 
     compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
-                              args.include_browser_data, args.scope_extension_keys, args.tolerate_errors)
+                              args.browser_mode, args.legacy_mode, args.scope_extension_keys, args.tolerate_errors)
     output = compiler.compile()
 
     duration = perf_counter() - start_seconds
