@@ -612,7 +612,7 @@ class SchemaCompiler:
 
         # item["attributes"] should exist at this point, so no need to double-check
         # Merge item's attributes on top of the copy of the include attribute, preferring item's data
-        SchemaCompiler._merge_attributes(attributes, item["attributes"], context)
+        self._merge_attributes(attributes, item["attributes"], context)
 
         # replace item "attributes" with merged / resolved include attributes
         item["attributes"] = attributes
@@ -827,11 +827,9 @@ class SchemaCompiler:
             if attribute_type not in types_attributes:
                 attribute["type"] = "object_t"
                 attribute["object_type"] = attribute_type
-                if attribute_type in self._objects:
-                    attribute["object_name"] = self._objects[attribute_type].get("caption")
-                else:
-                    raise SchemaException(f'Dictionary attribute "{attribute_name}"'
-                                          f' uses undefined object "{attribute_type}"')
+                if attribute_type not in self._objects:
+                    raise SchemaException(self._dictionary_error_message(attribute_name, attribute,
+                                                                         f'uses undefined object "{attribute_type}"'))
 
     def _process_classes(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends" inheritance since afterward
@@ -1026,7 +1024,8 @@ class SchemaCompiler:
                 context = f'extension "{patch["extension"]}" patch'
                 self._validate_object_observables(patch_name, patch, context, is_patch=True)
                 self._observables_from_object(patch_name, patch, context)
-                self._observables_from_item_attributes(self._objects, patch_name, patch, "Object", context, is_patch=True)
+                self._observables_from_item_attributes(self._objects, patch_name, patch, "Object", context,
+                                                       is_patch=True)
                 # Not supported:
                 # self._observables_from_item_observables(
                 #     self._objects, patch_name, patch, "Object", context, is_patch=True)
@@ -1196,9 +1195,9 @@ class SchemaCompiler:
                     # TODO: This is new. Useful?
                     base.setdefault("_patched_by_extensions", []).append(patch["extension"])
 
-                SchemaCompiler._merge_profiles(base, patch)
-                SchemaCompiler._merge_attributes(base.setdefault("attributes", {}),
-                                                 patch.setdefault("attributes", {}), context)
+                self._merge_profiles(base, patch)
+                self._merge_attributes(base.setdefault("attributes", {}),
+                                       patch.setdefault("attributes", {}), context)
                 # Top-level observable.
                 # Only occurs in objects, but is safe to do for classes too.
                 put_non_none(base, "observable", patch.get("observable"))
@@ -1209,14 +1208,13 @@ class SchemaCompiler:
                 # Top-level attribute associations.
                 # Only occurs in classes, but is safe to do for objects too.
                 put_non_none(base, "associations", patch.get("associations"))
-                SchemaCompiler._patch_constraints(base, patch)
+                self._patch_constraints(base, patch)
 
-    @staticmethod
-    def _merge_attributes(dest_attributes: JObject, source_attributes: JObject, context: str) -> None:
+    def _merge_attributes(self, dest_attributes: JObject, source_attributes: JObject, context: str) -> None:
         for source_attribute_name, source_attribute in source_attributes.items():
             if source_attribute_name in dest_attributes:
                 dest_attribute = dest_attributes[source_attribute_name]
-                SchemaCompiler._merge_attribute_detail(
+                self._merge_attribute_detail(
                     dest_attribute, source_attribute, f'{context} attribute "{source_attribute_name}"')
             else:
                 dest_attributes[source_attribute_name] = source_attribute
@@ -1225,8 +1223,9 @@ class SchemaCompiler:
     def _merge_attribute_detail(dest_attribute: JObject, source_attribute: JObject, context: str) -> None:
         for source_key, source_value in source_attribute.items():
             if source_key == "profile":
-                if source_value is None:  # special meaning: don't enable via profile
-                    # TODO: delete key. Leave for now to help diffs with Elixir export by being consistent with it.
+                if source_value is None:
+                    # Special meaning: don't enable via profile.
+                    # dest_attribute will end up with null profile
                     pass
                 else:
                     if "profile" in dest_attribute and dest_attribute["profile"] != source_value:
@@ -1264,18 +1263,16 @@ class SchemaCompiler:
                 # Remove base constraints if patch explicitly defines an empty constraints list
                 del base["constraints"]
 
-    @staticmethod
-    def _resolve_extends(items: JObject, kind: str) -> None:
+    def _resolve_extends(self, items: JObject, kind: str) -> None:
         for item_name, item in items.items():
-            SchemaCompiler._resolve_item_extends(items, item_name, item, kind)
+            self._resolve_item_extends(items, item_name, item, kind)
 
-    @staticmethod
-    def _resolve_item_extends(items: JObject, item_name: str, item: JObject, kind: str) -> None:
+    def _resolve_item_extends(self, items: JObject, item_name: str, item: JObject, kind: str) -> None:
         if item_name is None or item is None:
             return
 
         parent_name = item.get("extends")
-        SchemaCompiler._resolve_item_extends(items, parent_name, items.get(parent_name), kind)
+        self._resolve_item_extends(items, parent_name, items.get(parent_name), kind)
         assert parent_name == item.get("extends"), (f'{kind} "{item_name}" "extends" value should not change after'
                                                     f' recursively processing parent: original value: "{parent_name}",'
                                                     f' current value: "{item.get("extends", "<deleted>")}"')
@@ -1291,29 +1288,17 @@ class SchemaCompiler:
                 for source_key, source_value in item.items():
                     if source_key == "attributes":
                         new_attributes = new_item.get("attributes", {})
-                        deep_merge(new_attributes, source_value)
-                        # Remove any keys that have null (None) values
-                        # TODO: This doesn't seem to happen. Still needed?
-                        #       After everything is working, try removing.
-                        for k, v in new_attributes.items():
-                            if v is None:
-                                logger.debug('Attribute "%s" is None in %s "%s"', k, kind, item_name)
-                        new_attributes = dict((k, v) for k, v in new_attributes.items() if v is not None)
+                        self._merge_attributes(new_attributes, source_value,
+                                               f'{kind} "{item_name}" extending "{parent_name}"')
                         new_item["attributes"] = new_attributes
                     elif source_key == "profiles":
-                        SchemaCompiler._merge_profiles(new_item, item)
+                        self._merge_profiles(new_item, item)
                     else:
-                        # Only replace value if source isn't None (JSON null)
-                        # TODO: This doesn't seem to happen. Still needed?
-                        #       After everything is working, try removing.
-                        if source_value is not None:
-                            new_item[source_key] = source_value
-                        else:
-                            logger.debug('Not merging null value of key "%s" in %s "%s"', source_key, kind, item_name)
+                        new_item[source_key] = source_value
+
                 items[item_name] = new_item
             else:
-                raise SchemaException(f'{kind} "{item.get("name", "<unknown>")}"'
-                                      f' extends undefined {kind} "{parent_name}"')
+                raise SchemaException(f'{kind} "{item_name}" extends undefined {kind} "{parent_name}"')
 
     def _enrich_and_validate_dictionary(self) -> None:
         if self.browser_mode:
@@ -1371,9 +1356,6 @@ class SchemaCompiler:
             # TODO: Are "attribute_keys" used for all types or only object types? (Seems like only object types.)
             #       Once everything is working, try only setting "attribute_keys" for object types.
             enriched_link["attribute_keys"] = [item_attribute_name]
-            # TODO: Do we need to do special extension processing from Utils.update_attributes?
-            #       It looks like this was a hack to avoid defining extension attributes in its dictionary.
-            #       That code is NOT replicated here.
             if item_attribute_name in dictionary_attributes:
                 dictionary_attribute = dictionary_attributes[item_attribute_name]
                 links = dictionary_attribute.setdefault("_links", [])
@@ -1395,8 +1377,6 @@ class SchemaCompiler:
                 # Object dictionary type
                 # Add "object_name" to attribute details based on caption.
                 # NOTE: This must be done after resolving patches and extends so caption is resolved.
-                # TODO: self._enrich_dictionary_object_types() also sets "object_name", which seems unnecessary and
-                #       too early anyway.
                 object_type = attribute["object_type"]
                 if object_type in self._objects:
                     obj = self._objects[object_type]
@@ -1500,8 +1480,7 @@ class SchemaCompiler:
                     else:
                         name = f'profile "{profile_name}"'
                     self._tolerable_error(SchemaException(f'Attribute "{profile_attribute_name}" in {name}'
-                                                          f' is not a defined dictionary attribute'
-                                                          f' (found when enriching profile attributes)'))
+                                                          f' is not a defined dictionary attribute'))
 
     def _validate_object_profiles_and_add_links(self) -> None:
         self._validate_item_profiles_and_add_links("object", self._objects)
@@ -1750,8 +1729,6 @@ class SchemaCompiler:
     def _finish_attributes(self):
         self._finish_item_attributes(self._classes, "class")
         self._finish_item_attributes(self._objects, "object")
-        # TODO: Is this redundant with _enrich_profiles_attributes_from_dictionary?
-        #       Perhaps we can remove _enrich_profiles_attributes_from_dictionary.
         self._finish_item_attributes(self._profiles, "profile")
 
     def _finish_item_attributes(self, items: JObject, kind: str) -> None:
