@@ -4,8 +4,6 @@ import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from re import fullmatch
-from tarfile import fully_trusted_filter
 from typing import Callable, Optional
 
 from exceptions import SchemaException
@@ -552,7 +550,8 @@ class SchemaCompiler:
                 raise TypeError(f"Illegal {sub_context} value type:"
                                 f" expected string or array (list), but got {json_type_from_value(include_value)}")
 
-        # TODO: Enable via flag or carefully determine if include is overwriting anything,
+        # TODO: This is can easily overwrite existing information.
+        #       Consider carefully determining if include is overwriting anything,
         #       perhaps with a new overwrite flag to utils.deep_merge.
         # Second resolve $include in attribute details. An include at this level is a JSON object containing
         # exactly the information to merge in. These are (or were) used to extract common enum values.
@@ -619,12 +618,7 @@ class SchemaCompiler:
         item["attributes"] = attributes
 
     def _merge_attribute_detail_include(
-        self,
-        attributes: JObject,
-        attribute_name: str,
-        attribute: JObject,
-        context: str,
-        include_path: Path
+        self, attributes: JObject, attribute_name: str, attribute: JObject, context: str, include_path: Path
     ) -> None:
         include_attribute = self._get_include_contents(context, include_path)
 
@@ -808,12 +802,11 @@ class SchemaCompiler:
             if ext_item_name in items:
                 item = items[ext_item_name]
                 if "extension" in item:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_name}" collides'
-                                          f' with extension "{item["extension"]}" {kind}'
-                                          f' with caption "{item.get("caption", "")}"')
+                    item_kind = f'extension "{item["extension"]}" {kind}'
                 else:
-                    raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_name}" collides'
-                                          f' with base schema {kind} with caption "{item.get("caption", "")}"')
+                    item_kind = f'base schema {kind}'
+                raise SchemaException(f'Collision: extension "{extension_name}" {kind} "{ext_item_name}" collides'
+                                      f' with {item_kind} with caption "{item.get("caption", "")}"')
             items[ext_item_name] = ext_item
 
     def _consolidate_extension_patches(self, extensions: list[Extension]) -> None:
@@ -846,7 +839,7 @@ class SchemaCompiler:
         self._observables_from_classes()
 
         if self.browser_mode:
-            self._add_source_to_item_attributes(self._classes, "class")
+            self._add_source_to_item_attributes(self._classes)
             self._add_source_to_patch_item_attributes(self._class_patches, "class")
         self._resolve_patches(self._classes, self._class_patches, "class")
         self._resolve_extends(self._classes, "class")
@@ -955,7 +948,7 @@ class SchemaCompiler:
         self._observables_from_objects()
 
         if self.browser_mode:
-            self._add_source_to_item_attributes(self._objects, "object")
+            self._add_source_to_item_attributes(self._objects)
             self._add_source_to_patch_item_attributes(self._object_patches, "object")
         self._resolve_patches(self._objects, self._object_patches, "object")
         self._resolve_extends(self._objects, "object")
@@ -1157,16 +1150,10 @@ class SchemaCompiler:
         return item_name, item_name  # fallback
 
     @staticmethod
-    def _add_source_to_item_attributes(items: JObject, kind: str) -> None:
+    def _add_source_to_item_attributes(items: JObject) -> None:
         for item_name, item in items.items():
             for attribute_name, attribute in item.setdefault("attributes", {}).items():
-                try:
-                    attribute["_source"] = item_name
-                except TypeError as e:
-                    if "extension" in item:
-                        kind = f'"{item["extension"]}" extension {kind}'
-                    raise SchemaException(f'Invalid attribute type in "{attribute_name}" of {kind} "{item_name}":'
-                                          f' expected object, but got {json_type_from_value(attribute)}, ') from e
+                attribute["_source"] = item_name
 
     @staticmethod
     def _add_source_to_patch_item_attributes(patch_dict: PatchDict, kind: str) -> None:
@@ -1195,12 +1182,15 @@ class SchemaCompiler:
                     f'Patch name "{patch_name}" should match extends base name "{base_name}"'
 
                 context = f'extension "{patch["extension"]}" {kind} patch "{patch_name}"'
-                logger.info('%s is patching "%s"', context, base_name)
-
                 if base_name not in items:
                     raise SchemaException(f'{context} attempted to patch undefined {kind} "{base_name}"')
 
                 base = items[base_name]
+
+                if "extension" in base:
+                    logger.info('PATCH: %s is patching "%s" from extension "%s"', context, base_name, base["extension"])
+                else:
+                    logger.info('PATCH: %s is patching "%s" from base schema', context, base_name)
 
                 if self.browser_mode:
                     # TODO: This is new. Useful?
@@ -1399,10 +1389,8 @@ class SchemaCompiler:
             if "type" in attribute:
                 attribute_type = attribute["type"]
             else:
-                raise SchemaException(f'Dictionary attribute'
-                                      f' {self._name_with_possible_extension(attribute_name, attribute)}'
-                                      f' does not define "type"')
-
+                raise SchemaException(self._dictionary_error_message(attribute_name, attribute,
+                                                                     'does not define "type"'))
             if attribute_type == "object_t":
                 # Object dictionary type
                 # Add "object_name" to attribute details based on caption.
@@ -1414,27 +1402,22 @@ class SchemaCompiler:
                     obj = self._objects[object_type]
                     attribute["object_name"] = obj.get("caption", "")
                 else:
-                    raise SchemaException(
-                        f'Undefined object type in dictionary attribute "{attribute_name}": "{object_type}"')
+                    raise SchemaException(self._dictionary_error_message(attribute_name, attribute,
+                                                                         f'uses undefined object type "{object_type}"'))
             else:
                 # Normal dictionary type
                 if attribute_type in dictionary_types:
                     type_detail = dictionary_types[attribute_type]
-                    if "caption" in type_detail:
-                        attribute["type_name"] = type_detail["caption"]
-                    else:
-                        raise SchemaException(f'Dictionary attribute type "{attribute_type}"'
-                                              f' does not define "caption"')
+                    attribute["type_name"] = type_detail.get("caption", "")
                 else:
-                    raise SchemaException(f'Dictionary attribute'
-                                          f' {self._name_with_possible_extension(attribute_name, attribute)}'
-                                          f' has undefined "type" of "{attribute_type}"')
+                    raise SchemaException(self._dictionary_error_message(attribute_name, attribute,
+                                                                         f'uses undefined "type" "{attribute_type}"'))
 
     @staticmethod
-    def _name_with_possible_extension(name: str, detail: JObject) -> str:
-        if "extension" in detail:
-            return f'"{name}" from extension "{detail["extension"]}"'
-        return name
+    def _dictionary_error_message(attribute_name: str, attribute: JObject, problem: str) -> str:
+        if "extension" in attribute:
+            return f'Dictionary attribute "{attribute_name}" from extension "{attribute["extension"]}" {problem}'
+        return f'Dictionary attribute "{attribute_name}" {problem}'
 
     def _add_datetime_sibling_dictionary_attributes(self) -> None:
         """
@@ -1456,7 +1439,7 @@ class SchemaCompiler:
             for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("type") == "timestamp_t":
                     sibling = deepcopy(attribute)
-                    # TODO: fix up attribute_keys in _links if they are actually used (Elixir codes do NOT fix up)
+                    # TODO: fix up attribute_keys in _links if they are actually used (Elixir code does NOT fix up)
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
                     additions[self._make_datetime_attribute_name(attribute_name)] = sibling
@@ -1486,11 +1469,9 @@ class SchemaCompiler:
                 if observable_type_id in self._observable_type_id_dict:
                     entry = self._observable_type_id_dict[observable_type_id]
                     if "extension" in detail:
-                        ext = f'extension "{detail["extension"]}" '
-                    else:
-                        ext = ''
+                        kind = f'extension "{detail["extension"]}" {kind}'
                     raise SchemaException(f'Collision of observable type_id {observable_type_id} between'
-                                          f' {ext}{kind} "{key}" caption "{detail.get("caption")}" "observable"'
+                                          f' {kind} "{key}" caption "{detail.get("caption")}" "observable"'
                                           f' and "{entry["caption"]}": {entry["description"]}')
                 else:
                     entry = self._make_observable_enum_entry(detail.get("caption", ""),
@@ -1513,24 +1494,22 @@ class SchemaCompiler:
                 else:
                     # TODO: This is an actual error that the Elixir compile hid via a weird hack.
                     #       This occurs in the splunk extension in its unused splunk profile.
-                    #       The splunk/splunk profile should simply be removed.
+                    #       The splunk/splunk profile should simply be removed and here always raise an exception.
                     if "extension" in profile:
-                        source = f'extension "{profile["extension"]}" profile "{profile_name}"'
+                        name = f'extension "{profile["extension"]}" profile "{profile_name}"'
                     else:
-                        source = f'profile "{profile_name}"'
-                    self._tolerable_error(SchemaException(f'Attribute "{profile_attribute_name}" in {source}'
+                        name = f'profile "{profile_name}"'
+                    self._tolerable_error(SchemaException(f'Attribute "{profile_attribute_name}" in {name}'
                                                           f' is not a defined dictionary attribute'
                                                           f' (found when enriching profile attributes)'))
 
     def _validate_object_profiles_and_add_links(self) -> None:
-        self._validate_profiles_and_add_links("object", self._objects)
+        self._validate_item_profiles_and_add_links("object", self._objects)
 
     def _validate_class_profiles_and_add_links(self) -> None:
-        self._validate_profiles_and_add_links("class", self._classes)
+        self._validate_item_profiles_and_add_links("class", self._classes)
 
-    def _validate_profiles_and_add_links(self, group: str, items: JObject) -> None:
-        # TODO: check attributes
-        # TODO: check profile attributes (but don't add links for profiles)
+    def _validate_item_profiles_and_add_links(self, group: str, items: JObject) -> None:
         for item_name, item in items.items():
             if "profiles" in item:
                 for profile_name in item["profiles"]:
@@ -1545,10 +1524,10 @@ class SchemaCompiler:
                         profile = self._extension_scoped_profiles[profile_name]
                     else:
                         if "extension" in item:
-                            description = f'extension "{item["extension"]}" {group} "{item_name}"'
+                            name = f'extension "{item["extension"]}" {group} "{item_name}"'
                         else:
-                            description = f'{group} "{item_name}"'
-                        raise SchemaException(f'{description} uses undefined profile "{profile_name}"')
+                            name = f'{group} "{item_name}"'
+                        raise SchemaException(f'Undefined profile "{profile_name}" used in {name}')
 
                     if self.browser_mode:
                         link = self._make_link(group, item_name, item)
@@ -1761,12 +1740,12 @@ class SchemaCompiler:
                     attribute["requirement"] = "optional"
                     fixed.append(f'"{attribute_name}"')
             if fixed:
-                if "extension" in item:
-                    actual_kind = f'extension "{item["extension"]}" {kind}'
-                else:
-                    actual_kind = kind
                 fixed.sort()
-                missing_requirements.append(f'{actual_kind} "{item_name}" attribute(s): {", ".join(fixed)}')
+                if "extension" in item:
+                    name = f'extension "{item["extension"]}" {kind} "{item_name}"'
+                else:
+                    name = f'{kind} "{item_name}"'
+                missing_requirements.append(f'{name} attribute(s): {", ".join(fixed)}')
 
     def _finish_attributes(self):
         self._finish_item_attributes(self._classes, "class")
@@ -1790,10 +1769,10 @@ class SchemaCompiler:
                     #       This occurs in the splunk extension in its unused splunk profile.
                     #       The splunk/splunk profile should simply be removed.
                     if "extension" in item:
-                        actual_kind = f'extension "{item["extension"]}" {kind}'
+                        name = f'extension "{item["extension"]}" {kind} "{item_name}"'
                     else:
-                        actual_kind = kind
-                    self._tolerable_error(SchemaException(f'Attribute "{attribute_name}" in {actual_kind} "{item_name}"'
+                        name = f'{kind} "{item_name}"'
+                    self._tolerable_error(SchemaException(f'Attribute "{attribute_name}" in {name}'
                                                           f' is not a defined dictionary attribute'
                                                           f' (found when finishing attributes)'))
             item["attributes"] = new_attributes
@@ -1854,6 +1833,10 @@ class SchemaCompiler:
                 "all_classes": self._all_classes,
                 "all_objects": self._all_objects,
                 "version": self._version,
+                "metadata": {
+                    "version": 1,  # new layout
+                    "browser_mode?": True  # includes browser information
+                }
             }
 
         # Same as self.browser_mode but without "all_classes" and "all_objects"
@@ -1864,5 +1847,8 @@ class SchemaCompiler:
             "objects": objects,
             "profiles": self._profiles,
             "extensions": self._extensions,
-            "version": self._version
+            "version": self._version,
+            "metadata": {
+                "version": 1  # new layout
+            }
         }
