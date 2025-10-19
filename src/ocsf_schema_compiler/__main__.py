@@ -48,16 +48,6 @@ def main():
         help="output schema in legacy export schema layout; cannot be used with -b/--browser-mode;"
              " default: %(default)s")
     parser.add_argument(
-        "-s", "--scope-extension-keys",
-        action="store_true",
-        default=False,
-        help="scope extension keys; typically used with -l/--legacy-mode; default: %(default)s")
-    parser.add_argument(
-        "-t", "--tolerate-errors",
-        action="store_true",
-        default=False,
-        help="tolerate common extension errors during schema compilation; default: %(default)s")
-    parser.add_argument(
         "-v", "--verbosity",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="INFO",
@@ -70,7 +60,7 @@ def main():
     start_seconds = perf_counter()
 
     compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
-                              args.browser_mode, args.legacy_mode, args.scope_extension_keys, args.tolerate_errors)
+                              args.browser_mode, args.legacy_mode)
     output = compiler.compile()
 
     duration = perf_counter() - start_seconds

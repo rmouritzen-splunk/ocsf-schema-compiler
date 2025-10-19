@@ -1,4 +1,8 @@
+# TODO: Add linting and code formatting.
+
 install:
+	# TODO: Remove if not needed. For development-only requirements, use requirements-dev.txt.
+	# TODO: If this is needed, create virtual environment if not already created, and activate it.
 	pip install -r requirements.txt
 
 test:

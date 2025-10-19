@@ -52,8 +52,6 @@ class SchemaCompiler:
         extensions_paths: Optional[list[Path]],
         browser_mode: bool = False,
         legacy_mode: bool = False,
-        scope_extension_keys: bool = False,
-        tolerate_errors: bool = False,
     ) -> None:
         if browser_mode and legacy_mode:
             raise SchemaException("Browser mode and legacy mode are mutually exclusive")
@@ -63,8 +61,6 @@ class SchemaCompiler:
         self.extensions_paths: Optional[list[Path]] = extensions_paths
         self.browser_mode: bool = browser_mode
         self.legacy_mode: bool = legacy_mode
-        self.scope_extension_keys: bool = scope_extension_keys
-        self.tolerate_errors: bool = tolerate_errors
 
         logger.info("Schema path: %s", self.schema_path)
         if self.ignore_platform_extensions:
@@ -78,15 +74,16 @@ class SchemaCompiler:
                         " Including extra information needed by the schema browser (the OCSF Server).")
         if self.legacy_mode:
             logger.info("Legacy mode enabled. Compiled output will be in legacy schema export layout.")
-        if self.scope_extension_keys:
-            # TODO: This whole extension scoping thing is a mess. Can we simply avoid it?
-            logger.info('Adding extension scoped keys similar to the legacy compiler. This does not yield a compiled'
-                        ' schema that is functionally different. Rather, this option makes the compiled schema look'
-                        ' more like the legacy compiler output, and can be identical with legacy mode.'
-                        '\n    Note that due to compiler implementation differences, this option does not yield the'
-                        ' same results as the legacy compiler for extensions with category and dictionary attributes'
-                        ' that modify or overwrite existing attributes. The details are complicated and the legacy'
-                        ' was confusing anyway. This quirk does not affect base schema compilations.')
+            logger.info('Legacy mode also uses extension scoped keys similar to the legacy compiler.'
+                        '\n    Note 1:'
+                        '\n    Extension scoped keys are not necessary. Rather, they merely make the compiled'
+                        ' schema look like the legacy compiler output.'
+                        '\n    Note 2:'
+                        '\n    Due to compiler implementation differences, this option does not always yield the'
+                        ' same result as the legacy compiler. Extensions with category and dictionary attributes that'
+                        ' modify or overwrite existing attributes are handled weirdly in the legacy compiler. The'
+                        ' details are complicated and the output was confusing anyway. This difference does not affect'
+                        ' base schema compilations.')
 
         self._is_compiled: bool = False
         self._error_count: int = 0
@@ -139,7 +136,6 @@ class SchemaCompiler:
         self._enrich_and_validate_dictionary()
         self._observables_from_dictionary()
 
-        self._enrich_profiles_attributes_from_dictionary()
         self._validate_object_profiles_and_add_links()
         if self.browser_mode:
             self._add_object_links()
@@ -170,30 +166,12 @@ class SchemaCompiler:
         else:
             logger.info("Compile completed successfully")
 
-        logger.info("Compiled base schema version: %s", self._version)
+        logger.info("Compiled schema base version: %s", self._version)
         if self._extensions:
             logger.info("Compiled schema includes the following extension(s):\n%s",
                         json.dumps(self._extensions, indent=4, sort_keys=True))
 
         return output
-
-    def _tolerable_error(self, exception: SchemaException) -> None:
-        """
-        Log or raise exception for a particular schema error.
-
-        Some forms of errors can be tolerated but should be fixed. These mainly occur with schema extensions that are
-        not routinely validated against the OCSF metaschema.
-        """
-        # TODO: Remove all of this tolerable error stuff after the splunk extension is fixed
-        if self.tolerate_errors:
-            self._error_count += 1
-            logger.error("Schema error (tolerated): %s", str(exception))
-        else:
-            logger.error("Compile failed with schema error: %s", str(exception))
-            logger.error("Note: this error can be tolerated with the tolerate error option."
-                         " For command line usage, add the -t or --tolerate-errors option."
-                         " For code usage, set tolerate_errors to True when creating the SchemaCompiler class.")
-            raise exception
 
     def _warning(self, message: str, *args, **kwargs) -> None:
         self._warning_count += 1
@@ -205,7 +183,7 @@ class SchemaCompiler:
         self._dictionary = read_json_object_file(self.schema_path / "dictionary.json")
         self._classes = read_structured_items(self.schema_path, "events")
         self._objects = read_structured_items(self.schema_path, "objects")
-        self._profiles = self._read_and_enrich_profiles()
+        self._profiles = read_structured_items(self.schema_path, "profiles", item_callback_fn=self._cache_profile)
         self._resolve_includes()
 
     def _read_version(self) -> None:
@@ -218,6 +196,16 @@ class SchemaCompiler:
                 f"Schema version file does not exist (is this a schema directory?): {version_path}") from e
         except KeyError as e:
             raise SchemaException(f'The "version" key is missing in the schema version file: {version_path}') from e
+
+    def _cache_profile(self, path: Path, profile: JObject) -> None:
+        self._include_cache[path] = profile
+
+    @staticmethod
+    def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
+        for key, value in annotations.items():
+            # Only add annotation mappings that do no exist already in annotation
+            if key not in attribute:
+                attribute[key] = value
 
     def _read_and_merge_extensions(self) -> None:
         extensions: list[Extension] = self._read_extensions()
@@ -304,7 +292,7 @@ class SchemaCompiler:
         else:
             dictionary = {}
 
-        profiles = self._read_and_enrich_extension_profiles(base_path)
+        profiles = read_structured_items(base_path, "profiles", item_callback_fn=self._cache_profile)
 
         if is_platform_extension and "version" not in info:
             # Fall back to overall schema version for platform extensions that do not specify their own version
@@ -370,22 +358,6 @@ class SchemaCompiler:
                 profile["extension"] = extension.name
                 profile["extension_id"] = extension.uid
 
-    def _read_and_enrich_profiles(self) -> JObject:
-        return read_structured_items(self.schema_path, "profiles", self._enrich_profile)
-
-    def _read_and_enrich_extension_profiles(self, base_path: Path) -> JObject:
-        return read_structured_items(base_path, "profiles", self._enrich_profile)
-
-    def _enrich_profile(self, path: Path, profile: JObject) -> None:
-        attributes = profile.setdefault("attributes", {})
-        profile_name = profile.get("name")
-        annotations = profile.get("annotations")
-        for attribute_name, attribute in attributes.items():
-            attribute["profile"] = profile_name
-            if annotations:
-                self._add_attribute_annotations(annotations, attribute)
-        self._include_cache[path] = profile
-
     def _fix_extension_profile_uses(self, extension: Extension) -> None:
         self._fix_extension_profile_uses_in_items(extension, extension.classes, "class")
         self._fix_extension_profile_uses_in_items(extension, extension.class_patches, "class patch")
@@ -448,21 +420,15 @@ class SchemaCompiler:
                     self._warning('%s references unscoped profile "%s"; changing to "%s"',
                                   context, profile_name, scoped_profile_name)
                     return True, scoped_profile_name
+
                 elif profile_name in self._profiles:
                     # this is fine
-                    logger.info('%s uses base schema profile "%s"', context, profile_name)
+                    logger.debug('%s uses base schema profile "%s"', context, profile_name)
                 else:
                     raise SchemaException(f'{context} references profile "{profile_name}" that is undefined in this'
                                           f' extension and the base schema; note that references to extension profiles'
                                           f' should be scoped, e.g., "{extension.name}/{profile_name}"')
         return False, None
-
-    @staticmethod
-    def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
-        for key, value in annotations.items():
-            # Only add annotation mappings that do no exist already in annotation
-            if key not in attribute:
-                attribute[key] = value
 
     def _resolve_includes(self) -> None:
         path_resolver = lambda file_name: self.schema_path / file_name
@@ -502,10 +468,7 @@ class SchemaCompiler:
                                 f' extension directory {extension.base_path} or schema directory {self.schema_path}')
 
     def _resolve_item_includes(
-        self,
-        item: Optional[JObject],
-        context: str,
-        path_resolver: Callable[[str], Path]
+        self, item: Optional[JObject], context: str, path_resolver: Callable[[str], Path]
     ) -> None:
         item_attributes = item.setdefault("attributes", {})
 
@@ -604,7 +567,19 @@ class SchemaCompiler:
 
         attributes = deepcopy(include_item["attributes"])
 
-        # But first add in annotations, if any
+        # First do profile-specific enrichment if include is a profile,
+        # and annotation enrichment for all include cases (even though currently only profiles use attributes includes)
+
+        if include_item.get("meta") == "profile":
+            if "name" not in include_item:
+                raise SchemaException(f'Profile "name" is missing in {context}')
+            profile_name = include_item["name"]
+            for attribute_name, attribute in attributes.items():
+                if "profile" in attribute:
+                    raise SchemaException(f'Profile "{profile_name}" attribute "{attribute_name}" unexpectedly'
+                                          f' has a "profile"')
+                attribute["profile"] = profile_name
+
         if "annotations" in include_item:
             annotations = include_item["annotations"]
             for attribute in attributes.values():
@@ -696,14 +671,20 @@ class SchemaCompiler:
         Merge attributes from extension_item into base_item, preferring base_item's information.
         This is used for extension category and dictionary merging.
 
+        In this method, "base" refers to the existing definition at this point of the compile process. It could be a
+        definition from the base schema (without platform extensions) or another extension processed earlier.
+
         For an attribute that exists in extension_item but not base_item, the attribute is simply added.
         For an attribute that exists in both the extension_item and base_item, the attribute is shallowly merged
         if the extension attribute has an "overwrite" property with a value of true, otherwise the base attribute
         is left unchanged.
 
-        Also merge extension item's type attributes into base_item's type attributes. This is specific to the
-        dictionary. In this case, each extension_item type attributes is deeply merged into the base_item's type
-        attributes, thus preferring the extension's information.
+        For dictionaries, this also safely merges the extension item's dictionary type attributes, adding any
+        dictionary types defined in the extension. Modifying types is not supported, as this can result in
+        unwanted incompatibilities. (We could contemplate allow equivalent type definitions in the future.)
+        There is one special case of dictionary type modification that is allowed: the 1.0.0-rc.2 schema has a known
+        problem with some of its subtypes, and in this one case extensions are allowed to fix the issue with a deep
+        merge. The "splunk" extension fixes these specific issues.
         """
         base_attributes = base_item.setdefault("attributes", {})
         for ext_attribute_name, ext_attribute in extension_item.get("attributes", {}).items():
@@ -711,6 +692,9 @@ class SchemaCompiler:
                 # TODO: Reevaluate this after supporting overlapping profiles.
                 #       Attribute overwrites can potentially be done by multiple extensions,
                 #       so we should probably handle overlapping extensions here.
+                #       For now, we will fail for a couple reasons:
+                #         1. Compiled schema attributes have singular "extension" and "extension_id" properties.
+                #         2. We would need to merge or reconcile overlapping properties. What if type is different?
                 del ext_attribute["overwrite"]  # don't propagate the overwrite flag
                 base_attribute = base_item.get(ext_attribute_name)
                 if base_attribute:
@@ -734,37 +718,38 @@ class SchemaCompiler:
                 if base_attribute:
                     # Legacy compiler avoided collision by adding attribute with extension scope.
                     # But these attributes exist in a flat namespace, adding as scoped would require the extensive
-                    # and weird scoped extension name logic from the original Elixir schema compiler. And worse,
-                    # the result is both hard to reason about and looks weird in the schema browser.
-                    # TODO: This should be fixed in "splunk" extension. This case should only raise an exception.
-                    #  raise SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
-                    #                       f' does not have "overwrite" property and collides with existing attribute')
-                    # TODO: start of code block to remove
-                    self._tolerable_error(
-                        SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
-                                        f' does not have "overwrite" property and collides with existing attribute'))
-                    self._warning('Tolerating error by treating extension "%s" %s attribute "%s"'
-                                  ' as if it had "overwrite" property of true',
-                                  extension.name, kind, ext_attribute_name)
-                    if "extension" in base_attribute:
-                        # We are tolerating the "splunk" extension case, but not arbitrary extension collisions...
+                    # and weird scoped extension name logic from the legacy schema compiler. And worse, the result is
+                    # both hard to reason about and looks weird in the schema browser, causing multiple dictionary
+                    # attributes with the same name, along with incorrect references.
+                    if extension.name == "splunk" and self._version == "1.0.0-rc.2":
+                        # TODO: The "splunk" extension has a few cases were it hits this issue that are now revealed.
+                        #       These should be fixed. For now, log these cases and handle as special-case.
+                        self._warning('Fixing known issue with "splunk" extension: %s "%s" attribute does not have'
+                                      ' "overwrite" property and collides with existing attribute; treating'
+                                      ' attribute as if has "overwrite" property of true', kind, ext_attribute_name)
+                        if "extension" in base_attribute:
+                            # With this fix, we still will not allow collisions with other extensions
+                            # (this is defensive in case this occurs before this issue is fixe)
+                            raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
+                                                  f' "{ext_attribute_name}" is trying to do a tolerated overwrite of'
+                                                  f' attribute from extension "{base_attribute["extension"]}";'
+                                                  f' the schema compile does not handle extensions modifying each other')
+                        if self.browser_mode:
+                            # TODO: This is new. Useful?
+                            ext_attribute.setdefault("_overwritten_by_extensions", {})[extension.name] = "merged"
+                        # Shallowly merge, preferring ext_attribute keys
+                        base_attribute.update(ext_attribute)
+                    else:
                         raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
-                                              f' "{ext_attribute_name}" is trying to do a tolerated overwrite of'
-                                              f' attribute from extension "{base_attribute["extension"]}";'
-                                              f' the schema compile does not handle extensions modifying each other')
-                    if self.browser_mode:
-                        # TODO: This is new. Useful?
-                        ext_attribute.setdefault("_overwritten_by_extensions", {})[extension.name] = "merged"
-                    # Shallowly merge, preferring ext_attribute keys
-                    base_attribute.update(ext_attribute)
-                    # TODO: end of code block to remove
+                                              f' "{ext_attribute_name}" does not have "overwrite" property and collides'
+                                              f' with existing attribute')
                 else:
                     # This extension annotation means the extension added a new attribute (same as legacy compiler)
                     ext_attribute["extension"] = extension.name
                     ext_attribute["extension_id"] = extension.uid
                     base_attributes[ext_attribute_name] = ext_attribute
 
-        # For the dictionary case, merge the types form the extension into the base, without overwriting
+        # For the dictionary case, safely merge the types form the extension into the base, without overwriting.
         # Note: the legacy compiler did a deep merge of types attributes.
         if "types" in extension_item:
             base_types_attributes = base_item.setdefault("types", {}).setdefault("attributes", {})
@@ -784,15 +769,14 @@ class SchemaCompiler:
                         # The "splunk" extension fixes actually does fix these issues.
                         # NOTE: primitives dictionary types "string_t" and "long_t" do _not_ define "type", so we
                         #       cannot do a general validation ensuring all types defines a "type".
-                        # TODO: This cannot be fixed, so not using self._tolerable_error hack.
-                        logger.info('Known issue with schema version 1.0.0-rc.2: %s dictionary type "%s" is a subtype'
-                                    ' but does not define "type"; allowing extension "%s" to merge type to fix.',
+                        logger.info('Ignoring known issue with schema version 1.0.0-rc.2: %s dictionary type "%s" is'
+                                    ' a subtype but does not define "type" (note: extension "%s" fixes this issue)',
                                     base_desc, ext_attribute_name, extension.name)
                         deep_merge(base_attribute, ext_attribute)
                     else:
-                        raise SchemaException(f'Collision: extension "{extension.name}" {kind} type'
+                        raise SchemaException(f'Collision: extension "{extension.name}" {kind} dictionary type'
                                               f' "{ext_attribute_name}" is trying to overwrite {base_desc} type;'
-                                              f' modifying types is not supported')
+                                              f' modifying dictionary types is not supported')
                 else:
                     base_types_attributes[ext_attribute_name] = ext_attribute
 
@@ -1187,9 +1171,9 @@ class SchemaCompiler:
                 base = items[base_name]
 
                 if "extension" in base:
-                    logger.info('PATCH: %s is patching "%s" from extension "%s"', context, base_name, base["extension"])
+                    logger.info('Patch: %s is patching "%s" from extension "%s"', context, base_name, base["extension"])
                 else:
-                    logger.info('PATCH: %s is patching "%s" from base schema', context, base_name)
+                    logger.info('Patch: %s is patching "%s" from base schema', context, base_name)
 
                 if self.browser_mode:
                     # TODO: This is new. Useful?
@@ -1458,30 +1442,6 @@ class SchemaCompiler:
                                                              detail.get("description", ""), kind)
                     self._observable_type_id_dict[observable_type_id] = entry
 
-    def _enrich_profiles_attributes_from_dictionary(self) -> None:
-        dictionary_attributes = self._dictionary.setdefault("attributes", {})
-        for profile_name, profile in self._profiles.items():
-            for profile_attribute_name, profile_attribute in profile.setdefault("attributes", {}).items():
-                if profile_attribute_name in dictionary_attributes:
-                    dictionary_attribute = dictionary_attributes[profile_attribute_name]
-                    for key in ["caption", "description", "is_array", "enum", "type", "type_name", "object_name",
-                                "object_type", "observable", "source", "references", "sibling", "@deprecated"]:
-                        value = dictionary_attribute.get(key)
-                        if value is not None and key not in profile_attribute:
-                            profile_attribute[key] = value
-                    # TODO: This "profile" key is added in self._enrich_profiles then removed here. Why bother?
-                    del profile_attribute["profile"]
-                else:
-                    # TODO: This is an actual error that the Elixir compile hid via a weird hack.
-                    #       This occurs in the splunk extension in its unused splunk profile.
-                    #       The splunk/splunk profile should simply be removed and here always raise an exception.
-                    if "extension" in profile:
-                        name = f'extension "{profile["extension"]}" profile "{profile_name}"'
-                    else:
-                        name = f'profile "{profile_name}"'
-                    self._tolerable_error(SchemaException(f'Attribute "{profile_attribute_name}" in {name}'
-                                                          f' is not a defined dictionary attribute'))
-
     def _validate_object_profiles_and_add_links(self) -> None:
         self._validate_item_profiles_and_add_links("object", self._objects)
 
@@ -1729,7 +1689,23 @@ class SchemaCompiler:
     def _finish_attributes(self):
         self._finish_item_attributes(self._classes, "class")
         self._finish_item_attributes(self._objects, "object")
-        self._finish_item_attributes(self._profiles, "profile")
+
+        # Profile attributes are only used for schema browser UI of profiles. They are not needed for event validation,
+        # as the attribute details are merged into the classes and objects that use them.
+        if self.browser_mode:
+            # Do "annotations" processing so profile attributes match work done when including profiles
+            for item in self._profiles.values():
+                if "annotations" in item and "attributes" in item:
+                    annotations = item["annotations"]
+                    for attribute in item["attributes"].values():
+                        self._add_attribute_annotations(annotations, attribute)
+            # Then finish the attributes, enriching with dictionary attribute information
+            self._finish_item_attributes(self._profiles, "profile")
+        else:
+            # Strip profile attributes.
+            for profile in self._profiles.values():
+                if "attributes" in profile:
+                    del profile["attributes"]
 
     def _finish_item_attributes(self, items: JObject, kind: str) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
@@ -1737,21 +1713,33 @@ class SchemaCompiler:
             attributes = item.setdefault("attributes", {})
             new_attributes = {}
             for attribute_name, attribute in attributes.items():
+                # TODO: Attribute that is not defined in dictionary attributes should never happen at this point,
+                #       but does today due to the flawed splunk/splunk profile in the "splunk" extension. Once fixed
+                #       The if / else block can be removed, and here we can use an assert to catch logic bugs.
+                # TODO: Start of what this block of code should eventually look like
+                #     assert attribute_name in dictionary_attributes, \
+                #         (f'Attribute "{attribute_name}" is not a defined dictionary attribute;'
+                #          f' this should have been caught earlier in the compile process')
+                #     new_attribute = deepcopy(dictionary_attributes[attribute_name])
+                #     deep_merge(new_attribute, attribute)
+                #     new_attributes[attribute_name] = new_attribute
+                # TODO: End of what this block of code should eventually look like
                 if attribute_name in dictionary_attributes:
                     new_attribute = deepcopy(dictionary_attributes[attribute_name])
                     deep_merge(new_attribute, attribute)
                     new_attributes[attribute_name] = new_attribute
                 else:
-                    # TODO: This the same error found in _enrich_profiles_attributes_from_dictionary
-                    #       This occurs in the splunk extension in its unused splunk profile.
-                    #       The splunk/splunk profile should simply be removed.
-                    if "extension" in item:
-                        name = f'extension "{item["extension"]}" {kind} "{item_name}"'
+                    # This is a known issue with the 1.0.0-rc.2 with "splunk" extension compilation, so we will log
+                    # ignore and log this specific case, and assert otherwise.
+                    if "splunk" in self._extensions and self._version == "1.0.0-rc.2":
+                        logger.debug('_finish_item_attributes - ignoring know issue with "splunk" extension:'
+                                     ' attribute "%s" in %s "%s" is not a defined dictionary attribute',
+                                     attribute_name, kind, item_name)
                     else:
-                        name = f'{kind} "{item_name}"'
-                    self._tolerable_error(SchemaException(f'Attribute "{attribute_name}" in {name}'
-                                                          f' is not a defined dictionary attribute'
-                                                          f' (found when finishing attributes)'))
+                        assert attribute_name in dictionary_attributes, \
+                            (f'Attribute "{attribute_name}" in {kind} "{item_name}" is not a defined dictionary'
+                             f' attribute; this should have been caught earlier in the compile process')
+
             item["attributes"] = new_attributes
             if self.browser_mode:
                 self._add_sibling_of_to_attributes(new_attributes)
@@ -1781,15 +1769,12 @@ class SchemaCompiler:
                 attribute["_sibling_of"] = sibling_of_dict[attribute_name]
 
     def _create_compile_output(self) -> JObject:
-        if self.scope_extension_keys:
+        if self.legacy_mode:
+            # Scoped extension keys make diffs against the legacy schema exports, except for extensions with
+            # attributes that overwrite existing attributes.
             classes = add_extension_scope_to_items(self._classes, self._objects)
             objects = add_extension_scope_to_items(self._objects, self._objects)
             add_extension_scope_to_dictionary(self._dictionary, self._objects)
-        else:
-            classes = self._classes
-            objects = self._objects
-
-        if self.legacy_mode:
             return {
                 "base_event": classes.get("base_event"),
                 "classes": classes,
@@ -1799,33 +1784,18 @@ class SchemaCompiler:
                 "version": self._version
             }
 
-        if self.browser_mode:
-            return {
-                "categories": self._categories,
-                "dictionary": self._dictionary,
-                "classes": classes,
-                "objects": objects,
-                "profiles": self._profiles,
-                "extensions": self._extensions,
-                "all_classes": self._all_classes,
-                "all_objects": self._all_objects,
-                "version": self._version,
-                "metadata": {
-                    "version": 1,  # new layout
-                    "browser_mode?": True  # includes browser information
-                }
-            }
-
-        # Same as self.browser_mode but without "all_classes" and "all_objects"
-        return {
+        output = {
             "categories": self._categories,
             "dictionary": self._dictionary,
-            "classes": classes,
-            "objects": objects,
+            "classes": self._classes,
+            "objects": self._objects,
             "profiles": self._profiles,
             "extensions": self._extensions,
             "version": self._version,
-            "metadata": {
-                "version": 1  # new layout
-            }
+            "compile_version": 1
         }
+        if self.browser_mode:
+            output["browser_mode?"] = True
+            output["all_classes"] = self._all_classes
+            output["all_objects"] = self._all_objects
+        return output
