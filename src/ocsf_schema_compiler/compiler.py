@@ -10,11 +10,10 @@ from exceptions import SchemaException
 from jsonish import (
     JObject, json_type_from_value, read_json_object_file, read_structured_items, read_patchable_structured_items
 )
+from legacy_mode import add_extension_scope_to_items, add_extension_scope_to_dictionary
 from utils import (
-    deep_merge, put_non_none,
-    is_hidden_class, is_hidden_object,
-    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid,
-    add_extension_scope_to_items, add_extension_scope_to_dictionary
+    deep_merge, put_non_none, is_hidden_class, is_hidden_object,
+    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid
 )
 
 logger = logging.getLogger(__name__)
