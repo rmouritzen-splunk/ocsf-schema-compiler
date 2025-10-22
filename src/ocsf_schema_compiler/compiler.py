@@ -51,15 +51,19 @@ class SchemaCompiler:
         extensions_paths: Optional[list[Path]],
         browser_mode: bool = False,
         legacy_mode: bool = False,
+        scope_extension_keys: bool = False,
     ) -> None:
         if browser_mode and legacy_mode:
             raise SchemaException("Browser mode and legacy mode are mutually exclusive")
+        if scope_extension_keys and not legacy_mode:
+            raise SchemaException("Scope extension keys option is only supported in legacy mode")
 
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
         self.extensions_paths: Optional[list[Path]] = extensions_paths
         self.browser_mode: bool = browser_mode
         self.legacy_mode: bool = legacy_mode
+        self.scope_extension_keys: bool = scope_extension_keys
 
         logger.info("Schema path: %s", self.schema_path)
         if self.ignore_platform_extensions:
@@ -73,16 +77,17 @@ class SchemaCompiler:
                         " Including extra information needed by the schema browser (the OCSF Server).")
         if self.legacy_mode:
             logger.info("Legacy mode enabled. Compiled output will be in legacy schema export layout.")
-            logger.info('Legacy mode also uses extension scoped keys similar to the legacy compiler.'
-                        '\n    Note 1:'
-                        '\n    Extension scoped keys are not necessary. Rather, they merely make the compiled'
-                        ' schema look like the legacy compiler output.'
-                        '\n    Note 2:'
-                        '\n    Due to compiler implementation differences, this option does not always yield the'
-                        ' same result as the legacy compiler. Extensions with category and dictionary attributes that'
-                        ' modify or overwrite existing attributes are handled weirdly in the legacy compiler. The'
-                        ' details are complicated and the output was confusing anyway. This difference does not affect'
-                        ' base schema compilations.')
+            if self.scope_extension_keys:
+                logger.info('Creating extension scoped keys similar to the legacy compiler.'
+                            '\n    Note 1:'
+                            '\n    Extension scoped keys are not necessary. Scoped extension keys make diffs against'
+                            ' the legacy schema export identical for many cases (see Note 2).'
+                            '\n    Note 2:'
+                            '\n    Differences occur for extensions with dictionary and category attributes that'
+                            ' overwrite existing attributes, and are due to compiler implementation differences. These'
+                            ' difference do not affect base schema compilations.'
+                            '\n    Note 3:'
+                            '\n    Profiles defined in extensions are always scoped by extension.')
 
         self._is_compiled: bool = False
         self._error_count: int = 0
@@ -639,11 +644,8 @@ class SchemaCompiler:
                                                             self._dictionary, extension.dictionary, "dictionary")
 
     def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
-        # TODO: Should extension profiles be extension scoped?
-        #       No other extension items are scoped, at least not effectively.
-        #       This answer affects concrete event.
-        #       This question needs to be asked of the community, as this could break existing usage.
-        #       Final answer might be allowing either form in concrete events.
+        # Extension profiles are extension scoped because those scoped names appear in concrete events.
+        # We must maintain the once case of extension-scoped names.
         for extension in extensions:
             if extension.profiles:
                 self._merge_extension_items(extension.name, extension.profiles, self._profiles, "profile")
@@ -1325,6 +1327,8 @@ class SchemaCompiler:
             "type": item_name,
             "caption": item.get("caption", "*No name*")
         }
+        if "extension" in item:
+            link["extension"] = item["extension"]
         if item.get("@deprecated"):
             link["deprecated?"] = True
         return link
@@ -1448,6 +1452,14 @@ class SchemaCompiler:
         self._validate_item_profiles_and_add_links("class", self._classes)
 
     def _validate_item_profiles_and_add_links(self, group: str, items: JObject) -> None:
+        # TODO: self._profiles has a different copy of an extension-scoped profile
+        #       than the one in self._extension_scoped_profiles
+        #       We need to make sure these have the same item.
+        #       Check the merge flow and fix.
+        #       Either put same in-memory object in each,
+        #       or only put extension profiles in self._extension_scoped_profiles
+        #         and fix profile lookups (if needed) as well as collision checks.
+
         for item_name, item in items.items():
             if "profiles" in item:
                 for profile_name in item["profiles"]:
@@ -1769,11 +1781,13 @@ class SchemaCompiler:
 
     def _create_compile_output(self) -> JObject:
         if self.legacy_mode:
-            # Scoped extension keys make diffs against the legacy schema exports, except for extensions with
-            # attributes that overwrite existing attributes.
-            classes = add_extension_scope_to_items(self._classes, self._objects)
-            objects = add_extension_scope_to_items(self._objects, self._objects)
-            add_extension_scope_to_dictionary(self._dictionary, self._objects)
+            if self.scope_extension_keys:
+                classes = add_extension_scope_to_items(self._classes, self._objects)
+                objects = add_extension_scope_to_items(self._objects, self._objects)
+                add_extension_scope_to_dictionary(self._dictionary, self._objects)
+            else:
+                classes = self._classes
+                objects = self._objects
             return {
                 "base_event": classes.get("base_event"),
                 "classes": classes,
@@ -1783,12 +1797,20 @@ class SchemaCompiler:
                 "version": self._version
             }
 
+        # Change profile keys to extension-scoped, matching references to it
+        scoped_profiles = {}
+        for profile_name, profile in self._profiles.items():
+            if "extension" in profile:
+                scoped_profiles[f'{profile["extension"]}/{profile_name}'] = profile
+            else:
+                scoped_profiles[profile_name] = profile
+
         output = {
             "categories": self._categories,
             "dictionary": self._dictionary,
             "classes": self._classes,
             "objects": self._objects,
-            "profiles": self._profiles,
+            "profiles": scoped_profiles,
             "extensions": self._extensions,
             "version": self._version,
             "compile_version": 1

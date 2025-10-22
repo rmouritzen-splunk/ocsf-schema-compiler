@@ -40,13 +40,18 @@ def main():
         action="store_true",
         default=False,
         help="include extra information needed by the schema browser (the OCSF Server);"
-             " ; cannot be used with -l/--legacy-mode; default: %(default)s")
+             " cannot be used with the -l, --legacy-mode option; default: %(default)s")
     group.add_argument(
         "-l", "--legacy-mode",
         action="store_true",
         default=False,
-        help="output schema in legacy export schema layout; cannot be used with -b/--browser-mode;"
+        help="output schema in legacy export schema layout; cannot be used with the -b, --browser-mode option;"
              " default: %(default)s")
+    parser.add_argument(
+        "-s", "--scope-extension-keys",
+        action="store_true",
+        default=False,
+        help="scope extension keys; can only be used with the -l, --legacy-mode option; default: %(default)s")
     parser.add_argument(
         "-v", "--verbosity",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
@@ -54,13 +59,15 @@ def main():
         help="logging verbosity as log level; logs are written to standard error; default: %(default)s")
 
     args = parser.parse_args()
+    if args.scope_extension_keys and not args.legacy_mode:
+        parser.error("-s, --scope-extension-keys requires -l, --legacy-mode")
 
     logging.basicConfig(format="%(levelname)s: %(message)s", style="%", stream=stderr, level=args.verbosity)
 
     start_seconds = perf_counter()
 
     compiler = SchemaCompiler(args.path, args.ignore_platform_extensions, args.extensions_paths,
-                              args.browser_mode, args.legacy_mode)
+                              args.browser_mode, args.legacy_mode, args.scope_extension_keys)
     output = compiler.compile()
 
     duration = perf_counter() - start_seconds
