@@ -37,6 +37,13 @@ class Extension:
     profiles: JObject
 
 
+@dataclass
+class ProfileInfo:
+    is_extension_profile: bool
+    extension_name: Optional[str]
+    caption: str
+
+
 # Type alias for dictionary from patch item name to a list of patch objects.
 # The value is list since different extensions can patch the same thing.
 type PatchList = list[JObject]  # list of patches for an item name
@@ -101,10 +108,12 @@ class SchemaCompiler:
         self._objects: JObject = {}
         # object patches consolidated from all extensions
         self._object_patches: PatchDict = {}
-        # Profile keyed by name only (unscoped names)
-        self._profiles: JObject = {}
-        # Same self._profiles as above, but using extension scoped names
-        self._extension_scoped_profiles: JObject = {}
+        # Profiles from the base schema
+        self._base_profiles: JObject = {}
+        # Profiles from all extensions - profile names (keys) are extension-scoped
+        self._extension_profiles: JObject = {}
+        # All profiles used for collision detection, mapping from unscoped profile name to a ProfileInfo instance
+        self._unscoped_profiles_info: dict[str, ProfileInfo] = {}
         # The extensions here are just the extension information as used by the schema browser,
         # not the complete data used during schema compilation. The values in this JObject are
         # thus a subset of the information in the Extension dataclass.
@@ -187,7 +196,7 @@ class SchemaCompiler:
         self._dictionary = read_json_object_file(self.schema_path / "dictionary.json")
         self._classes = read_structured_items(self.schema_path, "events")
         self._objects = read_structured_items(self.schema_path, "objects")
-        self._profiles = read_structured_items(self.schema_path, "profiles", item_callback_fn=self._cache_profile)
+        self._base_profiles = read_structured_items(self.schema_path, "profiles", item_callback_fn=self._cache_profile)
         self._resolve_includes()
 
     def _read_version(self) -> None:
@@ -425,12 +434,12 @@ class SchemaCompiler:
                                   context, profile_name, scoped_profile_name)
                     return True, scoped_profile_name
 
-                elif profile_name in self._profiles:
+                elif profile_name in self._base_profiles:
                     # this is fine
                     logger.debug('%s uses base schema profile "%s"', context, profile_name)
                 else:
-                    raise SchemaException(f'{context} references profile "{profile_name}" that is undefined in this'
-                                          f' extension and the base schema; note that references to extension profiles'
+                    raise SchemaException(f'{context} references profile "{profile_name}" that not defined in this'
+                                          f' extension or the base schema; note that references to extension profiles'
                                           f' should be scoped, e.g., "{extension.name}/{profile_name}"')
         return False, None
 
@@ -648,22 +657,35 @@ class SchemaCompiler:
         # We must maintain the once case of extension-scoped names.
         for extension in extensions:
             if extension.profiles:
-                self._merge_extension_items(extension.name, extension.profiles, self._profiles, "profile")
-                # Also merge with extension scoped profiles dictionary
-                for profile_name, profile in extension.profiles.items():
-                    if "/" in profile_name:
+                # We cannot use self._merge_extension_items since we need to use extension-scoped keys in the
+                # self._extension_profiles dictionary, as well as add profile with unscoped name to the
+                # self._all_profiles_unscoped dictionary.
+                for unscoped_profile_name, profile in extension.profiles.items():
+                    if "/" in unscoped_profile_name:
                         raise SchemaException(
-                            f'Unexpected scoped profile in "{extension.name}" profile "{profile_name}"')
-                    scoped_name = f'{extension.name}/{profile_name}'
-                    if scoped_name in self._extension_scoped_profiles:
-                        other_profile = self._extension_scoped_profiles[scoped_name]
+                            f'Unexpected scoped profile name in "{extension.name}" profile "{unscoped_profile_name}"')
+
+                    if unscoped_profile_name in self._unscoped_profiles_info:
+                        other_profile_info = self._unscoped_profiles_info[unscoped_profile_name]
+                        if other_profile_info.is_extension_profile:
+                            where_defined = f'extension "{other_profile_info.extension_name}"'
+                        else:
+                            where_defined = f'base scheme'
                         raise SchemaException(
-                            f'Collision: extension "{extension.name}" profile with extension scoped name'
-                            f' "{scoped_name}" collides'
-                            f' with extension "{other_profile.get("extension", "")}" profile'
-                            f' with caption "{other_profile.get("caption", "")}"')
-                    else:
-                        self._extension_scoped_profiles[scoped_name] = profile
+                            f'Collision: extension "{extension.name}" profile unscoped name "{unscoped_profile_name}"'
+                            f' collides with {where_defined} profile with caption "{other_profile_info.caption}"')
+
+                    scoped_profile_name = f'{extension.name}/{unscoped_profile_name}'
+                    if scoped_profile_name in self._extension_profiles:
+                        other_profile = self._extension_profiles[scoped_profile_name]
+                        raise SchemaException(
+                            f'Collision: extension "{extension.name}" profile "{scoped_profile_name}" collides'
+                            f' with extension profile with caption "{other_profile.get("caption", "<no caption>")}"')
+
+                    self._extension_profiles[scoped_profile_name] = profile
+                    self._unscoped_profiles_info[unscoped_profile_name] = ProfileInfo(
+                        is_extension_profile=True, extension_name=extension.name,
+                        caption=profile.get("caption", "<no caption>"))
 
     def _merge_extension_attributes_with_overwrite(
         self, extension: Extension, base_item: JObject, extension_item: JObject, kind: str
@@ -1391,7 +1413,7 @@ class SchemaCompiler:
         When "datetime" profile and "datetime_t" dictionary type are both define,
         add magic datetime dictionary attributes as siblings to dictionary attributes with type "timestamp_t".
         """
-        got_datetime_profile = "datetime" in self._profiles
+        got_datetime_profile = "datetime" in self._base_profiles
         dictionary_types = self._dictionary.setdefault("types", {}).setdefault("attributes", {})
         got_datetime_t = "datetime_t" in dictionary_types
         got_timestamp_t = "timestamp_t" in dictionary_types
@@ -1452,36 +1474,30 @@ class SchemaCompiler:
         self._validate_item_profiles_and_add_links("class", self._classes)
 
     def _validate_item_profiles_and_add_links(self, group: str, items: JObject) -> None:
-        # TODO: self._profiles has a different copy of an extension-scoped profile
-        #       than the one in self._extension_scoped_profiles
-        #       We need to make sure these have the same item.
-        #       Check the merge flow and fix.
-        #       Either put same in-memory object in each,
-        #       or only put extension profiles in self._extension_scoped_profiles
-        #         and fix profile lookups (if needed) as well as collision checks.
-
         for item_name, item in items.items():
             if "profiles" in item:
                 for profile_name in item["profiles"]:
-                    if profile_name in self._profiles:
-                        profile = self._profiles[profile_name]
-                        if "extension" in profile:
-                            self._warning('Profile "%s" from extension "%s" used without scope in %s "%s"'
-                                          ' (got "%s", expected "%s/%s")',
-                                          profile_name, profile["extension"], group, item_name,
-                                          profile_name, profile["extension"], profile_name)
-                    elif profile_name in self._extension_scoped_profiles:
-                        profile = self._extension_scoped_profiles[profile_name]
+                    if "/" in profile_name:
+                        if profile_name in self._extension_profiles:
+                            profile = self._extension_profiles[profile_name]
+                        else:
+                            if "extension" in item:
+                                name = f'extension "{item["extension"]}" {group} "{item_name}"'
+                            else:
+                                name = f'{group} "{item_name}"'
+                            raise SchemaException(f'Undefined extension profile "{profile_name}" used in {name}')
+                    elif profile_name in self._base_profiles:
+                        profile= self._base_profiles[profile_name]
                     else:
                         if "extension" in item:
                             name = f'extension "{item["extension"]}" {group} "{item_name}"'
                         else:
                             name = f'{group} "{item_name}"'
-                        raise SchemaException(f'Undefined profile "{profile_name}" used in {name}')
+                        raise SchemaException(f'Undefined base schema profile "{profile_name}" used in {name}')
 
                     if self.browser_mode:
                         link = self._make_link(group, item_name, item)
-                        links = profile.get("_links", [])
+                        links = profile.setdefault("_links", [])
                         links.append(link)
 
     def _add_object_links(self) -> None:
@@ -1636,7 +1652,7 @@ class SchemaCompiler:
     def _verify_item_attributes_and_add_datetime(self, items: JObject, kind: str) -> None:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
 
-        got_datetime_profile = "datetime" in self._profiles
+        got_datetime_profile = "datetime" in self._base_profiles
         got_datetime_t = "datetime_t" in self._dictionary.setdefault("types", {}).setdefault("attributes", {})
         add_datetime = got_datetime_profile and got_datetime_t
 
@@ -1673,7 +1689,8 @@ class SchemaCompiler:
     def _ensure_attributes_have_requirement(self) -> None:
         # Track attributes in profiles, classes, and objects that incorrectly do _not_ have a "requirement"
         missing_requirements: list[str] = []
-        self._ensure_item_attributes_have_requirement(self._profiles, "profile", missing_requirements)
+        self._ensure_item_attributes_have_requirement(self._base_profiles, "profile", missing_requirements)
+        self._ensure_item_attributes_have_requirement(self._extension_profiles, "profile", missing_requirements)
         self._ensure_item_attributes_have_requirement(self._classes, "class", missing_requirements)
         self._ensure_item_attributes_have_requirement(self._objects, "object", missing_requirements)
         if missing_requirements:
@@ -1705,16 +1722,25 @@ class SchemaCompiler:
         # as the attribute details are merged into the classes and objects that use them.
         if self.browser_mode:
             # Do "annotations" processing so profile attributes match work done when including profiles
-            for item in self._profiles.values():
+            for item in self._base_profiles.values():
+                if "annotations" in item and "attributes" in item:
+                    annotations = item["annotations"]
+                    for attribute in item["attributes"].values():
+                        self._add_attribute_annotations(annotations, attribute)
+            for item in self._extension_profiles.values():
                 if "annotations" in item and "attributes" in item:
                     annotations = item["annotations"]
                     for attribute in item["attributes"].values():
                         self._add_attribute_annotations(annotations, attribute)
             # Then finish the attributes, enriching with dictionary attribute information
-            self._finish_item_attributes(self._profiles, "profile")
+            self._finish_item_attributes(self._base_profiles, "profile")
+            self._finish_item_attributes(self._extension_profiles, "profile")
         else:
             # Strip profile attributes.
-            for profile in self._profiles.values():
+            for profile in self._base_profiles.values():
+                if "attributes" in profile:
+                    del profile["attributes"]
+            for profile in self._extension_profiles.values():
                 if "attributes" in profile:
                     del profile["attributes"]
 
@@ -1797,20 +1823,12 @@ class SchemaCompiler:
                 "version": self._version
             }
 
-        # Change profile keys to extension-scoped, matching references to it
-        scoped_profiles = {}
-        for profile_name, profile in self._profiles.items():
-            if "extension" in profile:
-                scoped_profiles[f'{profile["extension"]}/{profile_name}'] = profile
-            else:
-                scoped_profiles[profile_name] = profile
-
         output = {
             "categories": self._categories,
             "dictionary": self._dictionary,
             "classes": self._classes,
             "objects": self._objects,
-            "profiles": scoped_profiles,
+            "profiles": self._base_profiles | self._extension_profiles,
             "extensions": self._extensions,
             "version": self._version,
             "compile_version": 1
