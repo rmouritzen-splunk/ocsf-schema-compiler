@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from copy import deepcopy
@@ -13,7 +12,8 @@ from jsonish import (
 from legacy_mode import add_extension_scope_to_items, add_extension_scope_to_dictionary
 from utils import (
     deep_merge, put_non_none, is_hidden_class, is_hidden_object,
-    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid
+    extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid,
+    shallow_jobject_differences, pretty_json_encode
 )
 
 logger = logging.getLogger(__name__)
@@ -182,7 +182,7 @@ class SchemaCompiler:
         logger.info("Compiled schema base version: %s", self._version)
         if self._extensions:
             logger.info("Compiled schema includes the following extension(s):\n%s",
-                        json.dumps(self._extensions, indent=4, sort_keys=True))
+                        pretty_json_encode(self._extensions))
 
         return output
 
@@ -430,7 +430,8 @@ class SchemaCompiler:
                 if profile_name in extension.profiles:
                     # This profile is defined, but should be scoped
                     scoped_profile_name = f'{extension.name}/{profile_name}'
-                    self._warning('%s references unscoped profile "%s"; changing to "%s"',
+                    self._warning('%s references unscoped profile "%s"; changing to "%s".'
+                                  ' References to profiles from extensions should be extension scoped.',
                                   context, profile_name, scoped_profile_name)
                     return True, scoped_profile_name
 
@@ -763,9 +764,29 @@ class SchemaCompiler:
                         # Shallowly merge, preferring ext_attribute keys
                         base_attribute.update(ext_attribute)
                     else:
-                        raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
-                                              f' "{ext_attribute_name}" does not have "overwrite" property and collides'
-                                              f' with existing attribute')
+                        diffs = shallow_jobject_differences(base_attribute, ext_attribute)
+                        safe_diff_keys = {"caption", "description", "extension", "extension_id"}
+                        if diffs.keys() - safe_diff_keys:
+                            # A key that we cannot tolerate changing has changed
+                            raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
+                                                  f' "{ext_attribute_name}" does not have "overwrite" property and'
+                                                  f' collides with existing attribute and has significant changes')
+                        else:
+                            sorted_diff_keys = sorted(diffs.keys())
+                            diffs_json = pretty_json_encode(diffs)
+                            self._warning('Collision: extension "%s" %s attribute "%s" does not have "overwrite"'
+                                          ' property and collides with existing attribute, however the changes'
+                                          ' are not significant.'
+                                          '\n\nTHIS EXTENSION ATTRIBUTE WILL BE IGNORED:'
+                                          ' extension "%s" %s attribute "%s".'
+                                          '\n\nThe differences are in the following "insignificant" keys: %s.'
+                                          ' Existing attribute versus extension attribute differences: %s'
+                                          '\nThis attribute should be either be removed from the extension or'
+                                          ' "overwrite": true should be added to the attribute.',
+                                          extension.name, kind, ext_attribute_name,
+                                          extension.name, kind, ext_attribute_name,
+                                          sorted_diff_keys, diffs_json)
+
                 else:
                     # This extension annotation means the extension added a new attribute (same as legacy compiler)
                     ext_attribute["extension"] = extension.name

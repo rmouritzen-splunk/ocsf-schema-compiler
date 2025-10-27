@@ -1,6 +1,7 @@
-from typing import Any
+import json
+from typing import Any, Optional
 
-from jsonish import JObject
+from jsonish import JObject, JValue
 
 
 def deep_merge(dest: dict, source: dict) -> None:
@@ -53,3 +54,18 @@ def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     return cls_uid * 100 + type_uid
 
 
+def shallow_jobject_differences(o1: JObject, o2: JObject) -> Optional[JObject]:
+    if o1 == o2:
+        return None
+    all_keys = set(o1.keys()) | set(o2.keys())
+    diffs: dict[str, list[JValue]] = {}
+    for key in all_keys:
+        v1 = o1.get(key)
+        v2 = o2.get(key)
+        if v1 != v2:
+            diffs[key] = [v1, v2]
+    return diffs
+
+
+def pretty_json_encode(v: Any) -> str:
+    return json.dumps(v, indent=4, sort_keys=True)
