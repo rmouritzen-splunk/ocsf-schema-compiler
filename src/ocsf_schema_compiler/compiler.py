@@ -877,9 +877,7 @@ class SchemaCompiler:
                 for k in ["name", "caption", "extends", "extension"]:
                     if k in cls:
                         cls_slice[k] = cls[k]
-                # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
-                #       The uses of "is_hidden" will need to be changed in the schema browser as well.
-                cls_slice["is_hidden"] = is_hidden_class(cls_name, cls)
+                cls_slice["hidden?"] = is_hidden_class(cls_name, cls)
                 self._all_classes[cls_name] = cls_slice
 
         # Remove hidden classes
@@ -986,9 +984,7 @@ class SchemaCompiler:
                 for k in ["name", "caption", "extends", "extension"]:
                     if k in obj:
                         obj_slice[k] = obj[k]
-                    # TODO: Change "is_hidden" to "hidden?" to be consistent with "deprecated?".
-                    #       The uses of "is_hidden" will need to be changed in the schema browser as well.
-                    obj_slice["is_hidden"] = is_hidden_object(obj_name)
+                    obj_slice["hidden?"] = is_hidden_object(obj_name)
                 self._all_objects[obj_name] = obj_slice
 
         # Remove hidden objects

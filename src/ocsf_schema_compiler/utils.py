@@ -54,7 +54,7 @@ def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     return cls_uid * 100 + type_uid
 
 
-def shallow_jobject_differences(o1: JObject, o2: JObject) -> Optional[JObject]:
+def shallow_jobject_differences(o1: JObject, o2: JObject) -> Optional[dict[str, list[JValue]]]:
     if o1 == o2:
         return None
     all_keys = set(o1.keys()) | set(o2.keys())
