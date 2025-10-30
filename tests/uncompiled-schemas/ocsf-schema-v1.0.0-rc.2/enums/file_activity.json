@@ -1,0 +1,46 @@
+{
+  "enum": {
+    "1": {
+      "caption": "Create"
+    },
+    "2": {
+      "caption": "Read"
+    },
+    "3": {
+      "caption": "Update"
+    },
+    "4": {
+      "caption": "Delete"
+    },
+    "5": {
+      "caption": "Rename"
+    },
+    "6": {
+      "caption": "Set Attributes"
+    },
+    "7": {
+      "caption": "Set Security"
+    },
+    "8": {
+      "caption": "Get Attributes"
+    },
+    "9": {
+      "caption": "Get Security"
+    },
+    "10": {
+      "caption": "Encrypt"
+    },
+    "11": {
+      "caption": "Decrypt"
+    },
+    "12": {
+      "caption": "Mount"
+    },
+    "13": {
+      "caption": "Unmount"
+    },
+    "14": {
+      "caption": "Open"
+    }
+  }
+}

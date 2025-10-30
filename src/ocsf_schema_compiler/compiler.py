@@ -5,15 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from exceptions import SchemaException
-from jsonish import (
+from ocsf_schema_compiler.exceptions import SchemaException
+from ocsf_schema_compiler.jsonish import (
     JObject, json_type_from_value, read_json_object_file, read_structured_items, read_patchable_structured_items
 )
-from legacy_mode import add_extension_scope_to_items, add_extension_scope_to_dictionary
-from utils import (
+from ocsf_schema_compiler.legacy_mode import add_extension_scope_to_items, add_extension_scope_to_dictionary
+from ocsf_schema_compiler.utils import (
     deep_merge, put_non_none, is_hidden_class, is_hidden_object,
     extension_scoped_category_uid, category_scoped_class_uid, class_uid_scoped_type_uid,
-    shallow_jobject_differences, pretty_json_encode
+    pretty_json_encode, quote_string, requirement_to_rank, rank_to_requirement
 )
 
 logger = logging.getLogger(__name__)
@@ -54,8 +54,8 @@ class SchemaCompiler:
     def __init__(
         self,
         schema_path: Path,
-        ignore_platform_extensions: bool,
-        extensions_paths: Optional[list[Path]],
+        ignore_platform_extensions: bool = False,
+        extensions_paths: Optional[list[Path]] = None,
         browser_mode: bool = False,
         legacy_mode: bool = False,
         scope_extension_keys: bool = False,
@@ -194,8 +194,10 @@ class SchemaCompiler:
         self._read_version()
         self._categories = read_json_object_file(self.schema_path / "categories.json")
         self._dictionary = read_json_object_file(self.schema_path / "dictionary.json")
-        self._classes = read_structured_items(self.schema_path, "events")
-        self._objects = read_structured_items(self.schema_path, "objects")
+        self._classes = read_structured_items(self.schema_path, "events",
+                                              item_callback_fn=self._upgrade_attribute_profiles)
+        self._objects = read_structured_items(self.schema_path, "objects",
+                                              item_callback_fn=self._upgrade_attribute_profiles)
         self._base_profiles = read_structured_items(self.schema_path, "profiles", item_callback_fn=self._cache_profile)
         self._resolve_includes()
 
@@ -210,12 +212,30 @@ class SchemaCompiler:
         except KeyError as e:
             raise SchemaException(f'The "version" key is missing in the schema version file: {version_path}') from e
 
+    def _upgrade_attribute_profiles(self, path: Path, item: JObject) -> None:
+        if not self.legacy_mode:
+            for attribute_name, attribute in item.get("attributes", {}).items():
+                if "profile" in attribute:
+                    profile = attribute["profile"]
+                    if profile is None:
+                        attribute["profiles"] = None
+                    else:
+                        if "profiles" in profile:
+                            # This is a processing bug. The metaschema does not allow "profiles" in attributes.
+                            raise SchemaException(f'Unexpectedly found "profiles" in attribute {attribute_name}:'
+                                                  f' {path}')
+                        attribute["profiles"] = [profile]
+                    del attribute["profile"]
+
     def _cache_profile(self, path: Path, profile: JObject) -> None:
         self._include_cache[path] = profile
 
     @staticmethod
     def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
         for key, value in annotations.items():
+            if key == "profiles":
+                # This isn't covered by metaschema, but could cause trouble for compilation.
+                raise SchemaException('Unexpectedly found "profiles" in attribute annotations')
             # Only add annotation mappings that do no exist already in annotation
             if key not in attribute:
                 attribute[key] = value
@@ -296,8 +316,10 @@ class SchemaCompiler:
         else:
             categories = {}
 
-        classes, class_patches = read_patchable_structured_items(base_path, "events")
-        objects, object_patches = read_patchable_structured_items(base_path, "objects")
+        classes, class_patches = read_patchable_structured_items(base_path, "events",
+                                                                 item_callback_fn=self._upgrade_attribute_profiles)
+        objects, object_patches = read_patchable_structured_items(base_path, "objects",
+                                                                  item_callback_fn=self._upgrade_attribute_profiles)
 
         dictionary_path = base_path / "dictionary.json"
         if dictionary_path.is_file():
@@ -381,39 +403,36 @@ class SchemaCompiler:
         # Structured items can be classes, objects, class patches, or object patches
         for item_name, item in items.items():
             item_context = f'Extension "{extension.name}" {kind} "{item_name}"'
-            profiles_names = item.get("profiles")
-            if profiles_names:
+            item_profiles = item.get("profiles")
+            if item_profiles:
                 profiles_context = f'{item_context} "profiles"'
-                is_any_fixed = False
-                new_profile_names = []
-                for profile_name in profiles_names:
-                    is_fixed, fixed_name = self._fix_extension_profile(extension, profile_name, profiles_context)
-                    if is_fixed:
-                        is_any_fixed = True
-                        new_profile_names.append(fixed_name)
-                    else:
-                        new_profile_names.append(profile_name)
-                if is_any_fixed:
-                    item["profiles"] = new_profile_names
+                fixed_item_profiles = []
+                for profile_name in item_profiles:
+                    fixed_item_profiles.append(self._fix_extension_profile(extension, profile_name, profiles_context))
+                item["profiles"] = fixed_item_profiles
 
             for attribute_name, attribute in item.setdefault("attributes", {}).items():
-                profile_name = attribute.get("profile")
-                if profile_name:
-                    attribute_context = f'{item_context} attribute "{attribute_name}"'
-                    is_fixed, fixed_name = self._fix_extension_profile(extension, profile_name, attribute_context)
-                    if is_fixed:
-                        attribute["profile"] = fixed_name
+                if self.legacy_mode:
+                    profile_name = attribute.get("profile")
+                    if profile_name:
+                        attribute_context = f'{item_context} attribute "{attribute_name}"'
+                        attribute["profile"] = self._fix_extension_profile(extension, profile_name, attribute_context)
+                else:
+                    attribute_profiles = attribute.get("profiles")
+                    if attribute_profiles:
+                        attribute_context = f'{item_context} attribute "{attribute_name}"'
+                        fixed_attribute_profiles = []
+                        for profile_name in attribute_profiles:
+                            fixed_attribute_profiles.append(self._fix_extension_profile(extension, profile_name,
+                                                                                        attribute_context))
+                        attribute["profiles"] = fixed_attribute_profiles
 
-    def _fix_extension_profile(
-        self, extension: Extension, profile_name: Optional[str], context: str
-    ) -> tuple[bool, Optional[str]]:
+    def _fix_extension_profile(self, extension: Extension, profile_name: Optional[str], context: str) -> str:
         """
-        Validates a profile reference used in an extension.
-        Raises a SchemaException if validation fails.
-        Returns False, None if profile_name is good, and True, str if the profile name should be changed.
+        Validates a profile reference used in an extension. Raises a SchemaException if validation fails.
+        Returns fixed profile name, adding extension-scope to name if not already scoped.
         """
         if profile_name:
-            # A "profile" can be set to null, meaning the attribute is not affected by any profile (always active)
             if "/" in profile_name:
                 split = profile_name.split("/")
                 extension_name = split[0]
@@ -433,16 +452,15 @@ class SchemaCompiler:
                     self._warning('%s references unscoped profile "%s"; changing to "%s".'
                                   ' References to profiles from extensions should be extension scoped.',
                                   context, profile_name, scoped_profile_name)
-                    return True, scoped_profile_name
+                    return scoped_profile_name
 
                 elif profile_name in self._base_profiles:
-                    # this is fine
+                    # This is fine
                     logger.debug('%s uses base schema profile "%s"', context, profile_name)
                 else:
                     raise SchemaException(f'{context} references profile "{profile_name}" that not defined in this'
-                                          f' extension or the base schema; note that references to extension profiles'
-                                          f' should be scoped, e.g., "{extension.name}/{profile_name}"')
-        return False, None
+                                          f' extension or the base schema')
+        return profile_name
 
     def _resolve_includes(self) -> None:
         path_resolver = lambda file_name: self.schema_path / file_name
@@ -592,7 +610,10 @@ class SchemaCompiler:
                 if "profile" in attribute:
                     raise SchemaException(f'Profile "{profile_name}" attribute "{attribute_name}" unexpectedly'
                                           f' has a "profile"')
-                attribute["profile"] = profile_name
+                if self.legacy_mode:
+                    attribute["profile"] = profile_name
+                else:
+                    attribute["profiles"] = [profile_name]
 
         if "annotations" in include_item:
             annotations = include_item["annotations"]
@@ -635,8 +656,7 @@ class SchemaCompiler:
 
     def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
-            self._merge_extension_attributes_with_overwrite(extension,
-                                                            self._categories, extension.categories, "category")
+            self._merge_extension_attributes(extension, self._categories, extension.categories, "category")
 
     def _merge_classes_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -650,8 +670,7 @@ class SchemaCompiler:
 
     def _merge_dictionary_from_extensions(self, extensions: list[Extension]) -> None:
         for extension in extensions:
-            self._merge_extension_attributes_with_overwrite(extension,
-                                                            self._dictionary, extension.dictionary, "dictionary")
+            self._merge_extension_attributes(extension, self._dictionary, extension.dictionary, "dictionary")
 
     def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
         # Extension profiles are extension scoped because those scoped names appear in concrete events.
@@ -688,7 +707,7 @@ class SchemaCompiler:
                         is_extension_profile=True, extension_name=extension.name,
                         caption=profile.get("caption", "<no caption>"))
 
-    def _merge_extension_attributes_with_overwrite(
+    def _merge_extension_attributes(
         self, extension: Extension, base_item: JObject, extension_item: JObject, kind: str
     ) -> None:
         """
@@ -699,9 +718,8 @@ class SchemaCompiler:
         definition from the base schema (without platform extensions) or another extension processed earlier.
 
         For an attribute that exists in extension_item but not base_item, the attribute is simply added.
-        For an attribute that exists in both the extension_item and base_item, the attribute is shallowly merged
-        if the extension attribute has an "overwrite" property with a value of true, otherwise the base attribute
-        is left unchanged.
+        For an attribute that exists in both the extension_item and base_item, the attribute is merged only if the
+        change is safe.
 
         For dictionaries, this also safely merges the extension item's dictionary type attributes, adding any
         dictionary types defined in the extension. Modifying types is not supported, as this can result in
@@ -712,86 +730,62 @@ class SchemaCompiler:
         """
         base_attributes = base_item.setdefault("attributes", {})
         for ext_attribute_name, ext_attribute in extension_item.get("attributes", {}).items():
-            if ext_attribute.get("overwrite"):
-                # TODO: Reevaluate this after supporting overlapping profiles.
-                #       Attribute overwrites can potentially be done by multiple extensions,
-                #       so we should probably handle overlapping extensions here.
-                #       For now, we will fail for a couple reasons:
-                #         1. Compiled schema attributes have singular "extension" and "extension_id" properties.
-                #         2. We would need to merge or reconcile overlapping properties. What if type is different?
-                del ext_attribute["overwrite"]  # don't propagate the overwrite flag
-                base_attribute = base_item.get(ext_attribute_name)
-                if base_attribute:
-                    if "extension" in base_attribute:
-                        raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
-                                              f'  "{ext_attribute_name}" is trying to overwrite attribute from'
-                                              f' extension "{base_attribute["extension"]}";'
-                                              f' the schema compile does not handle extensions modifying each other')
-                    if self.browser_mode:
-                        # TODO: This is new. Useful?
-                        ext_attribute.setdefault("_overwritten_by_extensions", {})[extension.name] = "merged"
-                    # Shallowly merge, preferring ext_attribute keys
-                    base_attribute.update(ext_attribute)
-                else:
-                    if self.browser_mode:
-                        # TODO: This is new. Useful?
-                        ext_attribute.setdefault("_overwritten_by_extensions", {})[extension.name] = "added"
-                    base_attributes[ext_attribute_name] = ext_attribute
-            else:
-                base_attribute = base_attributes.get(ext_attribute_name)
-                if base_attribute:
-                    # Legacy compiler avoided collision by adding attribute with extension scope.
-                    # But these attributes exist in a flat namespace, adding as scoped would require the extensive
-                    # and weird scoped extension name logic from the legacy schema compiler. And worse, the result is
-                    # both hard to reason about and looks weird in the schema browser, causing multiple dictionary
-                    # attributes with the same name, along with incorrect references.
-                    if extension.name == "splunk" and self._version == "1.0.0-rc.2":
-                        # TODO: The "splunk" extension has a few cases were it hits this issue that are now revealed.
-                        #       These should be fixed. For now, log these cases and handle as special-case.
-                        self._warning('Fixing known issue with "splunk" extension: %s "%s" attribute does not have'
-                                      ' "overwrite" property and collides with existing attribute; treating'
-                                      ' attribute as if has "overwrite" property of true', kind, ext_attribute_name)
-                        if "extension" in base_attribute:
-                            # With this fix, we still will not allow collisions with other extensions
-                            # (this is defensive in case this occurs before this issue is fixe)
-                            raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
-                                                  f' "{ext_attribute_name}" is trying to do a tolerated overwrite of'
-                                                  f' attribute from extension "{base_attribute["extension"]}";'
-                                                  f' the schema compile does not handle extensions modifying each other')
-                        if self.browser_mode:
-                            # TODO: This is new. Useful?
-                            ext_attribute.setdefault("_overwritten_by_extensions", {})[extension.name] = "merged"
-                        # Shallowly merge, preferring ext_attribute keys
-                        base_attribute.update(ext_attribute)
-                    else:
-                        diffs = shallow_jobject_differences(base_attribute, ext_attribute)
-                        safe_diff_keys = {"caption", "description", "extension", "extension_id"}
-                        if diffs.keys() - safe_diff_keys:
-                            # A key that we cannot tolerate changing has changed
-                            raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
-                                                  f' "{ext_attribute_name}" does not have "overwrite" property and'
-                                                  f' collides with existing attribute and has significant changes')
-                        else:
-                            sorted_diff_keys = sorted(diffs.keys())
-                            diffs_json = pretty_json_encode(diffs)
-                            self._warning('Collision: extension "%s" %s attribute "%s" does not have "overwrite"'
-                                          ' property and collides with existing attribute, however the changes'
-                                          ' are not significant.'
-                                          '\n\nTHIS EXTENSION ATTRIBUTE WILL BE IGNORED:'
-                                          ' extension "%s" %s attribute "%s".'
-                                          '\n\nThe differences are in the following "insignificant" keys: %s.'
-                                          ' Existing attribute versus extension attribute differences: %s'
-                                          '\nThis attribute should be either be removed from the extension or'
-                                          ' "overwrite": true should be added to the attribute.',
-                                          extension.name, kind, ext_attribute_name,
-                                          extension.name, kind, ext_attribute_name,
-                                          sorted_diff_keys, diffs_json)
+            base_attribute = base_attributes.get(ext_attribute_name)
+            if base_attribute:
+                # First, check if this is an attempt to overwrite another extension.
+                if "extension" in base_attribute:
+                    # This is not allowed as the result is non-deterministic, depending on the order the
+                    # extensions are processed. We have no notion of extension precedence, so this is not supported.
+                    raise SchemaException(f'Collision: extension "{extension.name}" {kind} attribute'
+                                          f' "{ext_attribute_name}" collides with attribute from extension'
+                                          f' "{base_attribute["extension"]}"; extensions are not allowed to modify'
+                                          f' each other as the results are non-deterministic')
 
-                else:
-                    # This extension annotation means the extension added a new attribute (same as legacy compiler)
-                    ext_attribute["extension"] = extension.name
-                    ext_attribute["extension_id"] = extension.uid
-                    base_attributes[ext_attribute_name] = ext_attribute
+                # Second check for a type change. This is not supported as it creates a schema that is not compatible
+                # with the base schema.
+                if "type" in ext_attribute:
+                    if ext_attribute["type"] != base_attribute["type"]:
+                        if self._version == "1.0.0-rc.2" and ext_attribute_name == "duration":
+                            logger.info('Allowing type change of known issue with schema version 1.0.0-rc.2: base'
+                                        ' schema dictionary attribute "duration" is type "integer_t" but should be'
+                                        ' "long_t" (note: extension "splunk" fixes this issue)')
+                        else:
+                            raise SchemaException(f'Extension "{extension.name}" {kind} attribute'
+                                                  f' "{ext_attribute_name}" attempted to make unsafe type change;'
+                                                  f' "{ext_attribute["type"]}" overwriting existing'
+                                                  f' "{base_attribute["type"]}"')
+                    if (ext_attribute["type"] == "object_t"  # we know both types are the same so base is object_t
+                        and ext_attribute["object_type"] != base_attribute["object_type"]):
+                        raise SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
+                                              f' attempted to make unsafe object type change;'
+                                              f' "{ext_attribute["object_type"]}"'
+                                              f' overwriting existing "{base_attribute["object_type"]}"')
+
+                # Third, check if the attribute's requirement is being relaxed. This is not supported as it creates
+                # a schema that is incompatible with the base schema. Event allowed by extension are not allowed by
+                # the base schema.
+                ext_req = ext_attribute.get("requirement")
+                base_req = base_attribute.get("requirement")
+                if requirement_to_rank(ext_req) < requirement_to_rank(base_req):
+                    raise SchemaException(f'Extension "{extension.name}" {kind} attribute "{ext_attribute_name}"'
+                                          f' attempted to make unsafe requirement change with {quote_string(ext_req)}'
+                                          f' reducing existing requirement of {quote_string(base_req)}')
+
+                # TODO: Safely handle enum merges
+                # Other changes are safe. So merge.
+                logger.info('Extension "%s" %s attribute "%s" is safely merging over existing attribute',
+                            extension.name, kind, ext_attribute_name)
+                logger.debug('\n    extension keys:'
+                             '\n        %s'
+                             '\n    merging over existing keys:'
+                             '\n        %s',
+                             sorted(ext_attribute.keys()), sorted(base_attribute.keys()))
+
+                deep_merge(base_attribute, ext_attribute)
+
+            else:
+                # The extension is adding new attribute
+                base_attributes[ext_attribute_name] = ext_attribute
 
         # For the dictionary case, safely merge the types form the extension into the base, without overwriting.
         # Note: the legacy compiler did a deep merge of types attributes.
@@ -813,9 +807,9 @@ class SchemaCompiler:
                         # The "splunk" extension fixes actually does fix these issues.
                         # NOTE: primitives dictionary types "string_t" and "long_t" do _not_ define "type", so we
                         #       cannot do a general validation ensuring all types defines a "type".
-                        logger.info('Ignoring known issue with schema version 1.0.0-rc.2: %s dictionary type "%s" is'
-                                    ' a subtype but does not define "type" (note: extension "%s" fixes this issue)',
-                                    base_desc, ext_attribute_name, extension.name)
+                        logger.info('Allowing change of known issue with schema version 1.0.0-rc.2: %s dictionary type'
+                                    ' "%s" is a subtype but does not define "type" (note: extension "splunk" fixes this'
+                                    ' issue)', base_desc, ext_attribute_name)
                         deep_merge(base_attribute, ext_attribute)
                     else:
                         raise SchemaException(f'Collision: extension "{extension.name}" {kind} dictionary type'
@@ -1211,7 +1205,11 @@ class SchemaCompiler:
                 base = items[base_name]
 
                 if "extension" in base:
-                    logger.info('Patch: %s is patching "%s" from extension "%s"', context, base_name, base["extension"])
+                    # This is not allowed as the result is non-deterministic, depending on the order the
+                    # extensions are processed. We have no notion of extension precedence, so this is not supported.
+                    raise SchemaException(f'Illegal patch attempt: {context} attempted to patch "{base_name}" from'
+                                          f' extension "{base['extension']}"; extensions are not allowed to patch'
+                                          f' each other as the results are non-deterministic')
                 else:
                     logger.info('Patch: %s is patching "%s" from base schema', context, base_name)
 
@@ -1243,31 +1241,53 @@ class SchemaCompiler:
             else:
                 dest_attributes[source_attribute_name] = source_attribute
 
-    @staticmethod
-    def _merge_attribute_detail(dest_attribute: JObject, source_attribute: JObject, context: str) -> None:
+    def _merge_attribute_detail(self, dest_attribute: JObject, source_attribute: JObject, context: str) -> None:
         for source_key, source_value in source_attribute.items():
             if source_key == "profile":
-                if source_value is None:
-                    # Special meaning: don't enable via profile.
-                    # dest_attribute will end up with null profile
-                    pass
+                if self.legacy_mode:
+                    if source_value is None:
+                        # Special meaning: attribute is not affected by profiles.
+                        dest_attribute["profile"] = None
+                    elif "profile" in dest_attribute and dest_attribute["profile"] != source_value:
+                        raise SchemaException(f'{context} attempted merge of "profile" with different non-null'
+                                              f' value "{source_value}", existing: {dest_attribute}'
+                                              f' - this is not supported with legacy mode compilation since the'
+                                              f' output would be backwards incompatible with the legacy format')
+                    else:
+                        # OK... safe merge
+                        dest_attribute["profile"] = source_value
                 else:
-                    if "profile" in dest_attribute and dest_attribute["profile"] != source_value:
-                        # TODO: We cannot currently handle merging attribute details from multiple profiles.
-                        #       We need to handle profiles and patching the same attribute from multiple
-                        #       extensions and/or profiles. The following (at least) will need to become lists
-                        #       everywhere (before any merging): "profile", "extension", and "extension_id".
-                        #       During merge we will also need to reconcile "requirement" and possibly other
-                        #       attribute details.
-                        raise SchemaException(f'{context} attempted merge of "profile" with different non-null value'
-                                              f' "{source_value}", existing: {dest_attribute}')
-
-            if (source_key in dest_attribute
-                and isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict)):
-                # TODO: Detect collisions, perhaps with overwrite flag in utils.deep_merge
-                deep_merge(dest_attribute[source_key], source_value)
-            else:
+                    raise SchemaException(f'LOGIC BUG: {context} "profile" should not exist while merging attributes')
+            elif source_key not in dest_attribute:
+                # this is always OK - safe merge, including "profiles"
                 dest_attribute[source_key] = source_value
+            elif source_value == dest_attribute[source_key]:
+                pass  # No change - nothing to do
+            elif "extension" in source_attribute and "extension" in dest_attribute:
+                raise SchemaException(f'{context} attempted merge of "{source_key}" on top of attribute from extension'
+                                      f' "{dest_attribute["extension"]}" - multiple extensions modifying the same'
+                                      f' attribute is not supported')
+            elif source_key == "profiles":
+                # Special merge - set to None if source is None, otherwise merge set of both
+                if source_value is None:
+                    dest_attribute["profiles"] = None
+                else:
+                    merged = set(dest_attribute["profiles"]) | set(source_attribute["profiles"])
+                    dest_attribute["profiles"] = sorted(merged)
+            elif (source_key == "requirement"
+                  and source_attribute.get("profiles") is not None and "profiles" in dest_attribute):
+                # Special merge of attribute affected by two profiles - requirement becomes max of both
+                # TODO: make sure this works as expected for AWS extension
+                dest_rank = requirement_to_rank(dest_attribute["requirement"])
+                source_rank = requirement_to_rank(source_attribute["requirement"])
+                dest_attribute["requirement"] = rank_to_requirement(max(dest_rank, source_rank))
+            else:
+                # hopefully a safe merge - deep merge if dicts, or overwrite
+                if isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict):
+                    # TODO: Detect collisions? Perhaps with overwrite flag in utils.deep_merge?
+                    deep_merge(dest_attribute[source_key], source_value)
+                else:
+                    dest_attribute[source_key] = source_value
 
     @staticmethod
     def _merge_profiles(dest: JObject, source: JObject) -> None:
@@ -1504,7 +1524,7 @@ class SchemaCompiler:
                                 name = f'{group} "{item_name}"'
                             raise SchemaException(f'Undefined extension profile "{profile_name}" used in {name}')
                     elif profile_name in self._base_profiles:
-                        profile= self._base_profiles[profile_name]
+                        profile = self._base_profiles[profile_name]
                     else:
                         if "extension" in item:
                             name = f'extension "{item["extension"]}" {group} "{item_name}"'
@@ -1624,7 +1644,7 @@ class SchemaCompiler:
         obj = self._objects[obj_name]
 
         # We specifically want actual and None values since profiles_dict is doing both gathering profiles
-        # and marking objects that have been processed.
+        # and marking things that have been processed.
         profiles_dict[obj_name] = obj.get("profiles")
 
         for attribute_name, attribute in obj.setdefault("attributes", {}).items():
@@ -1645,20 +1665,11 @@ class SchemaCompiler:
         assert "object_type" not in attribute, \
             f'Object attribute "{attribute_name}" unexpectedly already has "object_type"'
 
-        if "type" in attribute:
-            # The class or object defines the type. This occurs sometimes when type is refined in a specific case.
-            # These types should only ever be dictionary types
-            assert attribute["type"] in self._dictionary.setdefault("types").setdefault("attributes", {}), \
-                f'Object attribute "{attribute_name}" should be a defined dictionary type'
-            return None
-
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         if attribute_name not in dictionary_attributes:
             raise SchemaException(f'attribute "{attribute_name}" is not a defined dictionary attributes')
         dictionary_attribute = dictionary_attributes[attribute_name]
-        if "object_type" in dictionary_attribute:
-            return dictionary_attribute["object_type"]
-        return None
+        return dictionary_attribute.get("object_type")  # will return None if "object_type" is not present
 
     def _verify_object_attributes_and_add_datetime(self) -> None:
         self._verify_item_attributes_and_add_datetime(self._objects, "object")
@@ -1692,7 +1703,10 @@ class SchemaCompiler:
                         attribute_type = dictionary_attribute.get("type")
                     if attribute_type == "timestamp_t":
                         dt_attribute = deepcopy(attribute)
-                        dt_attribute["profile"] = "datetime"
+                        if self.legacy_mode:
+                            dt_attribute["profile"] = "datetime"
+                        else:
+                            dt_attribute["profiles"] = ["datetime"]
                         dt_attribute["requirement"] = "optional"
                         dt_attribute_additions[self._make_datetime_attribute_name(attribute_name)] = dt_attribute
 
@@ -1720,7 +1734,7 @@ class SchemaCompiler:
         for item_name, item in items.items():
             fixed: list[str] = []
             for attribute_name, attribute in item.setdefault("attributes", {}).items():
-                if "requirement" not in attribute:
+                if attribute.get("requirement") is None:
                     attribute["requirement"] = "optional"
                     fixed.append(f'"{attribute_name}"')
             if fixed:

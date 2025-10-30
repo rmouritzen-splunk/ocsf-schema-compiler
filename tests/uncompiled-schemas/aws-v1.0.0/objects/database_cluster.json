@@ -1,0 +1,89 @@
+{
+  "caption": "Database Cluster",
+  "description": "Represents a database cluster.",
+  "extends": "_entity",
+  "name": "db_cluster",
+  "attributes": {
+    "name": {
+      "description": "The name of the database cluster (e.g. mydb).",
+      "requirement": "recommended"
+    },
+    "cluster_members": {
+      "description": "The list of database cluster members <code>(e.g. [database-3-instance-1]</code>.",
+      "requirement": "optional"
+    },
+    "created_time": {
+      "description": "Indicates when the database cluster was created, in Universal Coordinated Time (UTC).",
+      "requirement": "optional"
+    },
+    "db_endpoint": {
+      "description": "The database cluster endpoint <code>(e.g. mydb.123456789012.us-west-2.rds.amazonaws.com)</code>.",
+      "requirement": "recommended"
+    },
+    "db_user": {
+      "description": "The database cluster administrator (e.g. admin).",
+      "requirement": "optional"
+    },
+    "encryption_details": {
+      "description": "The database cluster encryption details.",
+      "requirement": "recommended"
+    },
+    "engine": {
+      "description": "The database engine name (e.g. mysql).",
+      "requirement": "optional"
+    },
+    "is_encrypted": {
+      "description": "Whether the database cluster is encrypted (e.g. true).",
+      "requirement": "recommended"
+    },
+    "is_iam_authentication": {
+      "description": "Whether IAM authentication is enabled (e.g. true).",
+      "requirement": "optional"
+    },
+    "port": {
+      "description": "The database port number (e.g. 3306).",
+      "requirement": "optional"
+    },
+    "security_groups": {
+      "description": "Array of VPC security groups associated with the database cluster.",
+      "requirement": "recommended"
+    },
+    "snapshot_details": {
+      "description": "The database cluster snapshot details.",
+      "requirement": "optional"
+    },
+    "status": {
+      "description": "The database cluster status (e.g. available).",
+      "requirement": "recommended"
+    },
+    "subnet_group": {
+      "description": "The name of the subnet group associated with the database cluster.",
+      "requirement": "optional"
+    },
+    "uid": {
+      "description": "The database cluster identifier (e.g. cluster-1234567890abcdef0).",
+      "requirement": "recommended"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    },
+    "version": {
+      "description": "The database version (e.g. 5.7.38).",
+      "requirement": "optional"
+    },
+    "zones": {
+      "description": "The availability zones (e.g. us-west-2a).",
+      "requirement": "optional"
+    }
+  },
+  "constraints": {
+    "at_least_one": ["name", "uid", "uid_alt"]
+  },
+  "references": [
+    {
+      "description": "AWS Database Clusters",
+      "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/create-multi-az-db-cluster.html"
+    }
+  ]
+}

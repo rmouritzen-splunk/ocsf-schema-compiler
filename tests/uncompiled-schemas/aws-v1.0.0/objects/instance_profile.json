@@ -1,0 +1,41 @@
+{
+  "caption": "Instance Profile",
+  "description": "Information about the instance profile associated with the compute resource, which provides the resource with permissions to interact with other services",
+  "extends": "_entity",
+  "name": "instance_profile",
+  "attributes": {
+    "created_time": {
+      "description": "The time when the instance profile was created.",
+      "requirement": "optional"
+    },
+    "name": {
+      "description": "The name of the instance profile.",
+      "requirement": "recommended"
+    },
+    "path": {
+      "description": "The path of the instance profile.",
+      "requirement": "optional"
+    },
+    "uid": {
+      "description": "The unique ID of the instance profile.",
+      "requirement": "recommended"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    },
+    "users": {
+      "description": "The users of the instance profile.",
+      "requirement": "optional"
+    }
+  },
+  "constraints": {
+    "at_least_one": ["name", "uid", "uid_alt"]
+  },
+  "references": [
+    {
+      "description": "AWS EC2 IAM Instance Profiles",
+      "url": "https://docs.aws.amazon.com/managedservices/latest/userguide/defaults-instance-profile.html"
+    }
+  ]
+}

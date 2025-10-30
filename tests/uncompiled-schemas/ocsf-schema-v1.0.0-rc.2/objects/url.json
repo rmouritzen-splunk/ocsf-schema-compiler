@@ -1,0 +1,38 @@
+{
+  "caption": "Uniform Resource Locator",
+  "observable": 23,
+  "name": "url",
+  "description": "The Uniform Resource Locator (URL) object describes the path and reputation of a URL.",
+  "extends": "object",
+  "extends": "object",
+  "attributes": {
+    "categories": {
+    },
+    "category_ids": {
+      "requirement": "recommended"
+    },
+    "hostname": {
+      "description": "The URL host as extracted from the URL. For example: www.example.com.",
+      "requirement": "required"
+    },
+    "path": {
+      "description": "The URL path as extracted from the URL. For example: <code>/download/trouble</code>.",
+      "requirement": "required"
+    },
+    "port": {
+      "description": "The URL port. For example: <code>80</code>.",
+      "requirement": "recommended"
+    },
+    "query_string": {
+      "requirement": "recommended"
+    },
+    "resource_type": {
+    },
+    "scheme": {
+      "requirement": "recommended"
+    },
+    "text": {
+      "requirement": "required"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "caption": "Device",
+  "description": "The Device object represents an addressable computer system or host, which is typically connected to a computer network and participates in the transmission or processing of data within the computer network.",
+  "extends": "device",
+  "name": "device",
+  "attributes": {
+    "encryption_details": {
+      "description": "The encryption details of resource. See specific usage.",
+      "requirement": "recommended"
+    },
+    "image": {
+      "requirement": "recommended"
+    },
+    "instance_profile": {
+      "description": "The IAM instance profile to associate with the instance.",
+      "requirement": "recommended"
+    },
+    "launch_time": {
+      "description": "The time the instance was launched.",
+      "requirement": "recommended"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    }
+  }
+}

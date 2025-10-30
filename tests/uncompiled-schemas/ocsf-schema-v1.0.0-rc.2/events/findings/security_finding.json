@@ -1,0 +1,70 @@
+{
+  "caption": "Security Finding",
+  "category": "findings",
+  "description": "Security Finding events describe findings, detections, anomalies, alerts and/or actions performed by security products",
+  "extends": "findings",
+  "name": "security_finding",
+  "profiles": [
+    "security_control"
+  ],
+  "uid": 1,
+  "attributes": {
+    "attacks": {
+      "description": "The attack object describes the technique and associated tactics as defined by <a target='_blank' href='https://attack.mitre.org/wiki/ATT&CK_Matrix'>ATT&CK Matrix<sup>TM</sup></a>.",
+      "group": "context",
+      "requirement": "optional"
+    },
+    "compliance": {
+      "group": "context",
+      "requirement": "optional"
+    },
+    "finding": {
+      "group": "primary",
+      "requirement": "required"
+    },
+    "malware": {
+      "group": "context",
+      "requirement": "optional"
+    },
+    "process": {
+      "group": "context",
+      "requirement": "optional"
+    },
+    "resources": {
+      "group": "primary",
+      "requirement": "recommended"
+    },
+    "state": {
+      "description": "The normalized state of a security finding.",
+      "group": "context",
+      "requirement": "optional"
+    },
+    "state_id": {
+      "description": "The normalized state identifier of a security finding.",
+      "enum": {
+        "1": {
+          "caption": "New",
+          "description": "The finding is new and yet to be reviewed."
+        },
+        "2": {
+          "caption": "In Progress",
+          "description": "The finding is under review."
+        },
+        "3": {
+          "caption": "Suppressed",
+          "description": "The finding was reviewed, considered as a false positive and is now suppressed."
+        },
+        "4": {
+          "caption": "Resolved",
+          "description": "The finding was reviewed and remediated and is now considered resolved."
+        }
+      },
+      "group": "context",
+      "requirement": "required"
+    },
+    "vulnerabilities": {
+      "group": "context",
+      "requirement": "optional"
+    }
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "caption": "Device",
+  "name": "device",
+  "description": "Addressable device where events occurred.",
+  "extends": "endpoint",
+  "attributes": {
+    "autoscale_uid": {
+      "requirement": "optional"
+    },
+    "desc": {
+      "description": "The description of the device, ordinarily as reported by the operating system.",
+      "caption": "Description",
+      "requirement": "optional"
+    },
+    "hw_info": {
+      "requirement": "optional"
+    },
+    "domain": {
+      "description": "The network domain where the device resides. For example: <code>work.example.com</code>."
+    },
+    "groups": {
+      "description": "The group names to which the device belongs. For example: <code>[\"Windows Laptops\", \"Engineering\"]<code/>.",
+      "requirement": "optional"
+    },
+    "hostname": {
+      "description": "The device hostname."
+    },
+    "hypervisor": {
+      "requirement": "optional"
+    },
+    "image": {
+      "description": "The image used as a template to run the virtual machine.",
+      "requirement": "optional"
+    },
+    "imei": {
+      "requirement": "optional"
+    },
+    "ip": {
+      "description": "The device IP address, in either IPv4 or IPv6 format."
+    },
+    "is_compliant": {
+      "requirement": "optional"
+    },
+    "is_managed": {
+      "requirement": "optional"
+    },
+    "is_personal": {
+      "requirement": "optional"
+    },
+    "is_trusted": {
+      "requirement": "optional"
+    },
+    "location": {
+      "description": "The geographical location of the endpoint."
+    },
+    "mac": {
+      "description": "The device Media Access Control (MAC) address."
+    },
+    "name": {
+      "description": "The alternate device name, ordinarily as assigned by an administrator. <p><b>Note:</b> The <b>Name</b> could be any other string that helps to identify the device, such as a phone number; for example <code>310-555-1234</code>.</p>"
+    },
+    "network_interfaces": {
+      "requirement": "optional"
+    },
+    "org_unit": {
+      "requirement": "optional"
+    },
+    "os": {
+      "requirement": "optional"
+    },
+    "region": {
+      "description": "The region where the virtual machine is located. For example, an AWS Region.",
+      "requirement": "recommended"
+    },
+    "risk_level": {
+      "requirement": "optional"
+    },
+    "risk_level_id": {
+      "requirement": "optional"
+    },
+    "risk_score": {
+      "requirement": "optional"
+    },
+    "subnet": {
+      "requirement": "optional"
+    },
+    "type": {
+      "description": "The device type. For example: <code>unknown</code>, <code>server</code>, <code>desktop</code>, <code>laptop</code>, <code>tablet</code>, <code>mobile</code>, <code>virtual</code>, <code>browser</code>, or <code>other</code>.",
+      "caption": "Type",
+      "requirement": "optional"
+    },
+    "type_id": {
+      "description": "The device type ID.",
+      "enum": {
+        "1": {
+          "caption": "Server"
+        },
+        "2": {
+          "caption": "Desktop"
+        },
+        "3": {
+          "caption": "Laptop"
+        },
+        "4": {
+          "caption": "Tablet"
+        },
+        "5": {
+          "caption": "Mobile"
+        },
+        "6": {
+          "caption": "Virtual"
+        },
+        "7": {
+          "caption": "IOT"
+        },
+        "8": {
+          "caption": "Browser"
+        }
+      },
+      "caption": "Type ID",
+      "requirement": "required"
+    },
+    "uid": {
+      "description": "The unique identifier of the device."
+    },
+    "uuid": {
+      "description": "The universally unique identifier of the device. For example, AWS EC2 instance UUID."
+    }
+  }
+}

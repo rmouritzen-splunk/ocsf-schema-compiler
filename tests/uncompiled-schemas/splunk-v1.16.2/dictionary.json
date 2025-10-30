@@ -1,0 +1,947 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "account": {
+      "caption": "Account",
+      "description": "The account object describes details about the account that was the source or target of the activity.",
+      "type": "account"
+    },
+    "analytic": {
+      "caption": "Analytic",
+      "description": "The analytic technique used to analyze and derive insights from the data or information that led to the finding or conclusion.",
+      "type": "analytic"
+    },
+    "analytic_stories": {
+      "caption": "Analytic Stories",
+      "description": "The analytic stories associated with the detection.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "authentication_token": {
+      "caption": "Authentication Token",
+      "description": "The authentication token, ticket, or assertion. See specific usage.",
+      "type": "authentication_token"
+    },
+    "autonomous_system": {
+      "caption": "Autonomous System",
+      "description": "The Autonomous System details associated with an IP address.",
+      "type": "autonomous_system"
+    },
+    "auth_factors": {
+      "caption": "Authentication Factors",
+      "description": "Describes a category of methods used for identity verification in an authentication attempt.",
+      "type": "auth_factor",
+      "is_array": true
+    },
+    "banner": {
+      "caption": "Protocol Banner",
+      "description": "The initial connection response that a messaging server receives after it connects to an email server.",
+      "type": "string_t"
+    },
+    "caller": {
+      "caption": "Caller",
+      "description": "The point of origin from which the action was directed. Its values are derived via business logic. This usually represents the inferred source entity for a logon.",
+      "type": "inference"
+    },
+    "category": {
+      "caption": "Category",
+      "description": "The object category. See specific usage.",
+      "type": "string_t"
+    },
+    "category_id": {
+      "caption": "Category ID",
+      "description": "The normalized identifier of the object category. See specific usage.",
+      "sibling": "category",
+      "type": "integer_t"
+    },
+    "cc": {
+      "caption": "Cc",
+      "description": "The machine-readable email header Cc values, as defined by RFC 5322. For example <code>example.user@usersdomain.com</code>.",
+      "type": "email_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322"
+        }
+      ],
+      "is_array": true
+    },
+    "cc_mailboxes": {
+      "caption": "Cc Mailboxes",
+      "description": "The human-readable email header Cc Mailbox values. For example <code>'Example User &lt;example.user@usersdomain.com&gt;'</code>.",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322#section-3.4"
+        }
+      ],
+      "is_array": true
+    },
+    "client_interface": {
+      "caption": "Client Interface",
+      "description": "The client interface. See specific usage.",
+      "type": "network_interface"
+    },
+    "community_uid": {
+      "caption": "Community ID",
+      "description": "The Community ID of the network connection.",
+      "source": "community_id",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "Community ID definition.",
+          "url": "https://github.com/corelight/community-id-spec"
+        }
+      ]
+    },
+    "confidence_score": {
+      "caption": "Confidence Score",
+      "description": "The confidence score as reported by the event source.",
+      "type": "integer_t"
+    },
+    "coordinates": {
+      "@deprecated": {
+        "message": "Use specific <code> lat, long </code> attributes instead.",
+        "since": "1.2.0"
+      },
+      "caption": "Coordinates",
+      "description": "A two-element array, containing a longitude/latitude pair. The format conforms with <a target='_blank' href='https://geojson.org'>GeoJSON</a>. For example: <code>[-73.983, 40.719]</code>.",
+      "is_array": true,
+      "type": "float_t"
+    },
+    "cis_csc": {
+      "caption": "CIS CSC",
+      "description": "The CIS Critical Security Controls is a list of top 20 actions and practices an organization’s security team can take on such that cyber attacks or malware, are minimized and prevented.",
+      "is_array": true,
+      "type": "cis_control"
+    },
+    "confidence_id": {
+      "caption": "Confidence ID",
+      "description": "The normalized confidence level refers to the accuracy of the rule that created the finding. A rule with a low confidence level means that the detection scope is wide and may create finding reports that may not be malicious in nature.",
+      "enum": {
+        "0": {
+          "caption": "Unknown",
+          "description": "No confidence is assigned."
+        },
+        "1": {
+          "caption": "Low"
+        },
+        "2": {
+          "caption": "Medium"
+        },
+        "3": {
+          "caption": "High"
+        },
+        "99": {
+          "caption": "Other",
+          "description": "The confidence is not mapped to the defined enum values. See the <code>confidence</code> attribute, which contains a data source specific value."
+        }
+      },
+      "type": "integer_t"
+    },
+    "control": {
+      "caption": "Control",
+      "description": "The CIS critical security control.",
+      "type": "string_t"
+    },
+    "database": {
+      "caption": "Database",
+      "description": "The database object is used for databases which are typically datastore services that contain an organized collection of structured and unstructured data or a types of data.",
+      "type": "database"
+    },
+    "databucket": {
+      "caption": "Databucket",
+      "description": "The data bucket object is a basic container that holds data, typically organized through the use of data partitions.",
+      "type": "databucket"
+    },
+    "data_classification": {
+      "caption": "Data Classification",
+      "description": "The Data Classification object includes information about data classification levels and data category types.",
+      "type": "data_classification"
+    },
+    "data_sources": {
+      "caption": "Data Sources",
+      "description": "The data sources for the detection.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "delivered_to": {
+      "caption": "Delivered To",
+      "description": "The machine-readable <strong>Delivered-To</strong> email header field. For example <code>example.user@usersdomain.com</code>",
+      "type": "email_t",
+      "@deprecated": {
+        "message": "Use the <code>delivered_to_list</code> attribute instead.",
+        "since": "1.4.0"
+      }
+    },
+    "delivered_to_list": {
+      "caption": "Delivered To",
+      "description": "The machine-readable <strong>Delivered-To</strong> email header values. For example <code>example.user@usersdomain.com</code>",
+      "type": "email_t",
+      "references": [
+        {
+          "description": "RFC 9228",
+          "url": "https://www.rfc-editor.org/rfc/rfc9228"
+        }
+      ],
+      "is_array": true
+    },
+    "devices": {
+      "caption": "Devices",
+      "description": "The devices that are identified in reported the events.",
+      "is_array": true,
+      "type": "device"
+    },
+    "display_name": {
+      "caption": "Display Name",
+      "description": "The display name. See specific usage.",
+      "type": "string_t"
+    },
+    "domain": {
+      "caption": "Domain",
+      "description": "The name of the domain. See specific usage.",
+      "type": "string_t"
+    },
+    "domains": {
+      "caption": "Domains",
+      "description": "The domains that pertain to the event or object. See specific usage.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "duration": {
+      "caption": "Duration Milliseconds",
+      "description": "This represents the duration of the activity in milliseconds. See specific usage.",
+      "type": "long_t"
+    },
+    "email_addresses": {
+      "caption": "Email Addresses",
+      "description": "The user's additional email addresses.",
+      "is_array": true,
+      "type": "email_t"
+    },
+    "encryption_details": {
+      "caption": "Encryption Details",
+      "description": "The encryption details of a file or other content. See specific usage.",
+      "type": "encryption_details"
+    },
+    "end_date": {
+      "caption": "End Date",
+      "description": "The end date of a user's employment.",
+      "type": "timestamp_t"
+    },
+    "event_code": {
+      "caption": "Event Code",
+      "description": "The Event ID or Code that the product uses to describe the event.",
+      "type": "string_t"
+    },
+    "expiration_reason": {
+      "caption": "Expiration Reason",
+      "description": "The expiration reason. See specific usage.",
+      "type": "string_t"
+    },
+    "evidence": {
+      "caption": "Evidence",
+      "description": "The data the detection exposes to the analyst.",
+      "type": "json_t"
+    },
+    "evidences": {
+      "caption": "Evidence Artifacts",
+      "description": "Describes various evidence artifacts associated to the activity/activities that triggered a security detection.",
+      "type": "evidences",
+      "is_array": true
+    },
+    "factor_type": {
+      "caption": "Factor Type",
+      "description": "The type of authentication factor used in an authentication attempt.",
+      "type": "string_t"
+    },
+    "factor_type_id": {
+      "caption": "Factor Type ID",
+      "description": "The normalized identifier for the authentication factor.",
+      "sibling": "factor_type",
+      "type": "integer_t",
+      "enum": {
+        "0": {
+          "caption": "Unknown"
+        },
+        "1": {
+          "caption": "SMS",
+          "description": "User receives and inputs a code sent to their mobile device via SMS text message."
+        },
+        "2": {
+          "caption": "Security Question",
+          "description": "The user responds to a security question as part of a question-based authentication factor"
+        },
+        "3": {
+          "caption": "Phone Call",
+          "description": "System calls the user's registered phone number and requires the user to answer and provide a response."
+        },
+        "4": {
+          "caption": "Biometric",
+          "description": "Devices that verify identity-based on user's physical identifiers, such as fingerprint scanners or retina scanners."
+        },
+        "5": {
+          "caption": "Push Notification",
+          "description": "Push notification is sent to user's registered device and requires the user to acknowledge."
+        },
+        "6": {
+          "caption": "Hardware Token",
+          "description": "Physical device that generates a code to be used for authentication."
+        },
+        "7": {
+          "caption": "OTP",
+          "description": "Application generates a one-time password (OTP) for use in authentication."
+        },
+        "8": {
+          "caption": "Email",
+          "description": "A code or link is sent to a user's registered email address."
+        },
+        "9": {
+          "caption": "U2F",
+          "description": "Typically involves a hardware token, which the user physically interacts with to authenticate."
+        },
+        "10": {
+          "caption": "WebAuthn",
+          "description": "Web-based API that enables users to register devices as authentication factors."
+        },
+        "11": {
+          "caption": "Password",
+          "description": "The user enters a password that they have previously established."
+        },
+        "99": {
+          "caption": "Other"
+        }
+      }
+    },
+    "files": {
+      "caption": "Files",
+      "description": "The files that are part of the event or object.",
+      "type": "file",
+      "is_array": true
+    },
+    "finding_info": {
+      "caption": "Finding Information",
+      "description": "Describes the supporting information about a generated finding.",
+      "type": "finding_info"
+    },
+    "flag_history": {
+      "caption": "Connection Flag History",
+      "description": "The Connection Flag History summarizes events in a network connection. For example flags <code> ShAD </code> representing SYN, SYN/ACK, ACK and Data exchange.",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "Zeek History",
+          "url": "https://docs.zeek.org/en/master/scripts/base/protocols/conn/main.zeek.html#detailed-interface:~:text=Records%20the%20state%20history%20of%20connections%20as%20a%20string%20of%20letters.%20The%20meaning%20of%20those%20letters%20is"
+        }
+      ]
+    },
+    "forward_addr": {
+      "caption": "Forwarding Address",
+      "description": "The user's forwarding email address.",
+      "type": "email_t"
+    },
+    "from": {
+      "caption": "From",
+      "description": "The machine-readable email header From values, as defined by RFC 5322. For example <code>example.user@usersdomain.com</code>",
+      "type": "email_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322"
+        }
+      ]
+    },
+    "from_mailbox": {
+      "caption": "From Mailbox",
+      "description": "The human-readable email header From Mailbox value. For example <code>'Example User &lt;example.user@usersdomain.com&gt;'</code>.",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322#section-3.4"
+        }
+      ]
+    },
+    "full_name": {
+      "caption": "Full Name",
+      "description": "The full name. See specific usage.",
+      "type": "string_t"
+    },
+    "geohash": {
+      "caption": "Geohash",
+      "description": "<p>Geohash of the geo-coordinates (latitude and longitude).</p><a target='_blank' href='https://en.wikipedia.org/wiki/Geohash'>Geohashing</a> is a geocoding system used to encode geographic coordinates in decimal degrees, to a single string.",
+      "type": "string_t"
+    },
+    "home_folder": {
+      "caption": "Home",
+      "description": "The user's home folder.",
+      "type": "path_t"
+    },
+    "hostnames": {
+      "caption": "Hostname List",
+      "description": "The hostnames of an endpoint or a device.",
+      "is_array": true,
+      "type": "hostname_t"
+    },
+    "impact": {
+      "caption": "Impact",
+      "description": "The impact of the detection, valid range 0-100.",
+      "type": "integer_t"
+    },
+    "impact_id": {
+      "caption": "Impact ID",
+      "description": "The normalized impact of the detection.",
+      "enum": {
+        "0": {
+          "caption": "Unknown"
+        },
+        "1": {
+          "caption": "Low"
+        },
+        "2": {
+          "caption": "Medium"
+        },
+        "3": {
+          "caption": "High"
+        },
+        "4": {
+          "caption": "Critical"
+        },
+        "5": {
+          "caption": "Fatal"
+        },
+        "99": {
+          "caption": "Other",
+          "description": "The detection impact is not mapped. See the <code>impact</code> attribute, which contains a data source specific value."
+        }
+      },
+      "type": "integer_t"
+    },
+    "impact_score": {
+      "caption": "Impact",
+      "description": "The impact of the finding, valid range 0-100.",
+      "type": "integer_t"
+    },
+    "ips": {
+      "caption": "IP List",
+      "description": "The IP addresses of an endpoint or a device.",
+      "is_array": true,
+      "type": "ip_t"
+    },
+    "is_hotp": {
+      "caption": "HMAC-based One-time Password (HOTP)",
+      "description": "Whether the authentication factor is an HMAC-based One-time Password (HOTP).",
+      "type": "boolean_t"
+    },
+    "is_mfa": {
+      "caption": "Multi Factor Authentication",
+      "description": "Indicates whether Multi Factor Authentication was used during authentication.",
+      "type": "boolean_t"
+    },
+    "is_new_logon": {
+      "caption": "New Logon",
+      "description": "Indicates logon is from a device not seen before or a first time account logon.",
+      "type": "boolean_t"
+    },
+    "is_renewable": {
+      "caption": "Renewable",
+      "description": "The indication of whether something is renewable. See specific usage.",
+      "type": "boolean_t"
+    },
+    "is_vpn": {
+      "caption": "VPN Session",
+      "description": "The indication of whether the session is a VPN session.",
+      "type": "boolean_t"
+    },
+    "is_totp": {
+      "caption": "Time-based One-time Password (TOTP)",
+      "description": "Whether the authentication factor is a Time-based One-time Password (TOTP).",
+      "type": "boolean_t"
+    },
+    "kerberos_flags": {
+      "caption": "Kerberos Flags",
+      "description": "A bitmask, either in hexadecimal or decimal form, which encodes various attributes or permissions associated with a Kerberos ticket. These flags delineate specific characteristics of the ticket, such as its renewability or forwardability.",
+      "references": [
+        {
+          "description": "RFC 4120: 5.2.8.  KerberosFlags",
+          "url": "https://www.rfc-editor.org/rfc/rfc4120#section-5.2.8"
+        },
+        {
+          "description": "Microsoft Windows Security 4769 (see 'Ticket Options')",
+          "url": "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4769"
+        }
+      ],
+      "type": "string_t"
+    },
+    "key_uid": {
+      "caption": "Key UID",
+      "description": "The unique identifier of the key. See specific usage.",
+      "type": "string_t"
+    },
+    "kill_chain": {
+      "caption": "Kill Chain",
+      "description": "The <a target='_blank' href='https://www.lockheedmartin.com/en-us/capabilities/cyber/cyber-kill-chain.html'>Cyber Kill Chain®</a>.",
+      "is_array": true,
+      "type": "kill_chain"
+    },
+    "lat": {
+      "caption": "Latitude",
+      "description": "The geographical Latitude coordinate represented in Decimal Degrees (DD). For example: <code>42.361145</code>.",
+      "type": "float_t"
+    },
+    "log_level": {
+      "caption": "Log Level",
+      "description": "The audit level at which an event was generated.",
+      "type": "string_t"
+    },
+    "log_name": {
+      "caption": "Log Name",
+      "description": "The event log name. For example, syslog file name or Windows logging subsystem: Security.",
+      "type": "string_t"
+    },
+    "log_provider": {
+      "caption": "Log Provider",
+      "description": "The logging provider or logging service that logged the event. For example, Microsoft-Windows-Security-Auditing.",
+      "type": "string_t"
+    },
+    "log_type": {
+      "caption": "Log Type",
+      "description": "The log type, normalized to the caption of the <code>log_type_id</code> value. In the case of 'Other', it is defined by the event source.",
+      "type": "string_t"
+    },
+    "log_type_id": {
+      "caption": "Log Type ID",
+      "description": "The normalized log type identifier.",
+      "enum": {
+        "0": {
+          "caption": "Unknown",
+          "description": "The log type is unknown."
+        },
+        "1": {
+          "caption": "OS",
+          "description": "The log type is an Operating System log."
+        },
+        "2": {
+          "caption": "Application",
+          "description": "The log type is an Application log."
+        },
+        "99": {
+          "caption": "Other",
+          "description": "The log type is not mapped. See the <code>log_type</code> attribute, which contains a data source specific value."
+        }
+      },
+      "sibling": "log_type",
+      "type": "integer_t"
+    },
+    "log_version": {
+      "caption": "Log Version",
+      "description": "The event log schema version that specifies the format of the original event. For example syslog version or Cisco Log Schema Version.",
+      "type": "string_t"
+    },
+    "loggers": {
+      "caption": "Loggers",
+      "description": "An array of Logger objects that describe the devices and logging products between the event source and its eventual destination. Note, this attribute can be used when there is a complex end-to-end path of event flow.",
+      "is_array": true,
+      "type": "logger"
+    },
+    "long": {
+      "caption": "Longitude",
+      "description": "The geographical Longitude coordinate represented in Decimal Degrees (DD). For example: <code>-71.057083</code>.",
+      "type": "float_t"
+    },
+    "macs": {
+      "caption": "MAC List",
+      "description": "The Media Access Control (MAC) addresses of an endpoint or a device.",
+      "is_array": true,
+      "type": "mac_t"
+    },
+    "managed_by": {
+      "caption": "Managed By",
+      "description": "The distinguished name of the user that is assigned to manage this object.",
+      "type": "string_t"
+    },
+    "message": {
+      "caption": "Message",
+      "description": "The description of the event/finding, as defined by the source.",
+      "type": "string_t"
+    },
+    "message_trace_uid": {
+      "caption": "Message Trace UID",
+      "description": "The identifier that tracks a message that travels through multiple points of a messaging service.",
+      "references": [{"url": "https://learn.microsoft.com/en-us/previous-versions/office/developer/o365-enterprise-developers/jj984335(v=office.15)", "description": "For example Office 365 Message Trace Report."}],
+      "type": "string_t"
+    },
+    "metadata": {
+      "caption": "Metadata",
+      "description": "The metadata associated with the event or a finding.",
+      "type": "metadata"
+    },
+    "nicknames": {
+      "caption": "Nicknames",
+      "description": "The user's nicknames.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "nist": {
+      "caption": "NIST List",
+      "description": "The NIST Cybersecurity Framework recommendations for managing the cybersecurity risk.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "nt_hosts": {
+      "caption": "Network Host List",
+      "description": "The network hosts of an endpoint or a device.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "number": {
+      "caption": "Number",
+      "description": "The number of the entity. See specific usage.",
+      "type": "integer_t"
+    },
+    "observables": {
+      "caption": "Observables",
+      "description": "The observables associated with the event or a finding.",
+      "type": "observable",
+      "references": [
+        {
+          "description": "OCSF Observables FAQ",
+          "url": "https://github.com/ocsf/ocsf-docs/blob/main/Articles/Defining and Using Observables.md"
+        }
+      ],
+      "is_array": true
+    },
+    "org": {
+      "caption": "Organization",
+      "description": "Organization and org unit relevant to the event or object.",
+      "type": "organization"
+    },
+    "ou_name": {
+      "caption": "Org Unit Name",
+      "description": "The name of the organizational unit, within an organization.  For example, Finance, IT, R&D",
+      "type": "string_t"
+    },
+    "ou_uid": {
+      "caption": "Org Unit ID",
+      "description": "The alternate identifier for an entity's unique identifier. For example, its Active Directory OU DN or AWS OU ID.",
+      "type": "string_t"
+    },
+    "owners": {
+      "caption": "Owners",
+      "description": "List of names of the services or user accounts that own the resource.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "pci_domains": {
+      "caption": "PCI Domains",
+      "description": "List of the PCI domains of an endpoint or device.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "phase": {
+      "caption": "Kill Chain Phase",
+      "description": "The cyber kill chain phase.",
+      "type": "string_t"
+    },
+    "phase_id": {
+      "caption": "Kill Chain Phase ID",
+      "description": "The cyber kill chain phase identifier.",
+      "enum": {
+        "0": {
+          "caption": "Unknown",
+          "description": "The kill chain phase is unknown."
+        },
+        "1": {
+          "caption": "Reconnaissance",
+          "description": "The attackers pick a target and perform a detailed analysis, start collecting information (email addresses, conferences information, etc.) and evaluate the victim’s vulnerabilities to determine how to exploit them."
+        },
+        "2": {
+          "caption": "Weaponization",
+          "description": "The attackers develop a malware weapon and aim to exploit the discovered vulnerabilities."
+        },
+        "3": {
+          "caption": "Delivery",
+          "description": "The intruders will use various tactics, such as phishing, infected USB drives, etc."
+        },
+        "4": {
+          "caption": "Exploitation",
+          "description": "The intruders start leveraging vulnerabilities to executed code on the victim’s system."
+        },
+        "5": {
+          "caption": "Installation",
+          "description": "The intruders install malware on the victim’s system."
+        },
+        "6": {
+          "caption": "Command & Control",
+          "description": "Malware opens a command channel to enable the intruders to remotely manipulate the victim's system."
+        },
+        "7": {
+          "caption": "Actions on Objectives",
+          "description": "With hands-on keyboard access, intruders accomplish the mission’s goal."
+        },
+        "99": {
+          "caption": "Other"
+        }
+      },
+      "type": "integer_t",
+      "sibling": "phase"
+    },
+    "phone_number": {
+      "caption": "Phone Number",
+      "description": "The number associated with the phone.",
+      "type": "string_t"
+    },
+    "phones": {
+      "caption": "Phones",
+      "description": "The list of phone numbers.",
+      "is_array": true,
+      "type": "string_t"
+    },
+    "public_ip": {
+      "caption": "Public IP",
+      "description": "The public IP address of an endpoint or a device.",
+      "type": "ip_t"
+    },
+    "raw_data": {
+      "caption": "Raw Data",
+      "description": "The raw event/finding data as received from the source.",
+      "type": "string_t"
+    },
+    "related_analytics": {
+      "caption": "Related Analytics",
+      "description": "Describes analytics related to the analytic of a finding or detection as identified by the security product.",
+      "is_array": true,
+      "type": "analytic"
+    },
+    "reply_to": {
+      "caption": "Reply To",
+      "description": "The machine-readable email header Reply-To values, as defined by RFC 5322. For example <code>example.user@usersdomain.com</code>",
+      "type": "email_t",
+      "@deprecated": {
+        "message": "Use the <code>reply_to_mailboxes</code> attribute instead.",
+        "since": "1.4.0"
+      },
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322"
+        }
+      ]
+    },
+    "reply_to_mailboxes": {
+      "caption": "Reply To Mailboxes",
+      "description": "The human-readable email header Reply To Mailbox values. For example <code>'Example User &lt;example.user@usersdomain.com&gt;'</code>.",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322#section-3.4"
+        }
+      ],
+      "is_array": true
+    },
+    "risk_details": {
+      "caption": "Risk Details",
+      "description": "Describes the risk associated with the finding.",
+      "type": "string_t"
+    },
+    "security_questions": {
+      "caption": "Security Questions",
+      "description": "The question(s) provided to user for a question-based authentication factor.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "share": {
+      "caption": "Share",
+      "description": "The share name. See specific usage.",
+      "type": "string_t"
+    },
+    "share_type": {
+      "caption": "Share Type",
+      "description": "The share type, normalized to the caption of the share_type_id value. In the case of 'Other', it is defined by the event source.",
+      "type": "string_t"
+    },
+    "share_type_id": {
+      "caption": "Share Type Id",
+      "description": "The normalized identifier of the share type.",
+      "enum": {
+        "99": {
+          "caption": "Other",
+          "description": "The share type is not mapped. See the <code>share_type</code> attribute, which contains a data source specific value."
+        },
+        "0": {
+          "caption": "Unknown",
+          "description": "The share type is unknown."
+        },
+        "1": {
+          "caption": "File"
+        },
+        "2": {
+          "caption": "Pipe"
+        },
+        "3": {
+          "caption": "Print"
+        }
+      },
+      "sibling": "share_type",
+      "type": "integer_t"
+    },
+    "shell": {
+      "caption": "Shell",
+      "description": "The user's login shell.",
+      "type": "string_t"
+    },
+    "source": {
+      "caption": "Source",
+      "description": "The <a target='_blank' href='https://docs.splunk.com/Splexicon:Source'>source</a> of an event is the data input from which it originates. In the case of data monitored from files and directories, the source consists of the full pathname of the file or directory. In the case of a network-based source, the source field consists of the protocol and port, such as UDP:514.",
+      "type": "string_t"
+    },
+    "source_type": {
+      "caption": "Source Type",
+      "description": "The source type of an event is the format of the data input from which it originates.",
+      "type": "string_t"
+    },
+    "start_date": {
+      "caption": "Start Date",
+      "description": "The start date of a user's employment.",
+      "type": "timestamp_t"
+    },
+    "status_detail": {
+      "caption": "Status Detail",
+      "description": "The status detail contains additional information about the event/finding outcome.",
+      "type": "string_t"
+    },
+    "status_details": {
+      "caption": "Status Details",
+      "description": "A list of descriptions, containing additional information about the event/finding status.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "status_id": {
+      "caption": "Status ID",
+      "description": "The normalized identifier of the event status.",
+      "sibling": "status",
+      "type": "integer_t",
+      "enum": {
+        "0": {
+          "caption": "Unknown",
+          "description": "The status is unknown."
+        },
+        "1": {
+          "caption": "Success"
+        },
+        "2": {
+          "caption": "Failure"
+        },
+        "99": {
+          "caption": "Other",
+          "description": "The event status is not mapped. See the <code>status</code> attribute, which contains a data source specific value."
+        }
+      }
+    },
+    "tags": {
+      "caption": "Tags",
+      "description": "The list of tags; <code>{key:value}</code> pairs attached to an entity. A Tag may be used to categorize, filter, and search for entities. For e.g. <code>\"Environment\": \"Production\"</code>, <code>\"Owner\": \"007\"</code>. See specific usage.",
+      "type": "key_value_object",
+      "is_array": true
+    },
+    "target": {
+      "caption": "Target",
+      "description": "The desired entity towards which the action is directed. Its values are derived via business logic. This usually represents the inferred destination entity for a logon.",
+      "type": "inference"
+    },
+    "terminal": {
+      "caption": "Terminal",
+      "description": "The Pseudo Terminal. Ex: the tty or pts value.",
+      "type": "string_t"
+    },
+    "time": {
+      "caption": "Event Time",
+      "description": "The normalized event occurrence time or the finding creation time.",
+      "type": "timestamp_t"
+    },
+    "to_mailboxes": {
+      "caption": "To Mailboxes",
+      "description": "The human-readable email header To Mailbox values. For example <code>'Example User &lt;example.user@usersdomain.com&gt;'</code>.",
+      "type": "string_t",
+      "references": [
+        {
+          "description": "RFC 5322",
+          "url": "https://www.rfc-editor.org/rfc/rfc5322#section-3.4"
+        }
+      ],
+      "is_array": true
+    },
+    "transmit_time": {
+      "caption": "Transmission Time",
+      "description": "The event transmission time from one device to another.  See specific usage",
+      "type": "timestamp_t"
+    },
+    "tunnel_interface": {
+      "caption": "Tunnel Interface",
+      "description": "The interface of a tunnel. In a tunnelled session, this is the virtual interface. Ex: <code>utun1</code>. The IP is usually a private (local rfc-1918) IP.",
+      "type": "network_interface"
+    },
+    "tunnel_type": {
+      "caption": "Type",
+      "description": "The tunnel type. See specific usage.",
+      "type": "string_t"
+    },
+    "tunnel_type_id": {
+      "caption": "Type",
+      "description": "The normalized tunnel type ID.",
+      "sibling": "tunnel_type",
+      "type": "integer_t"
+    },
+    "type_name": {
+      "caption": "Type Name",
+      "description": "The event/finding type name, as defined by the type_uid.",
+      "type": "string_t"
+    },
+    "uid_alt": {
+      "caption": "Alternate ID",
+      "description": "The alternate unique identifier. See specific usage.",
+      "type": "string_t"
+    },
+    "urls": {
+      "caption": "URLs",
+      "description": "The URLs that pertain to the event or object.",
+      "type": "url",
+      "is_array": true
+    },
+    "users": {
+      "caption": "Users",
+      "description": "The users that are identified in reported the events.",
+      "is_array": true,
+      "type": "user"
+    },
+    "vendor_id_list": {
+      "caption": "Vendor ID List",
+      "description": "The list of vendor IDs. See specific usage.",
+      "is_array": true,
+      "type": "string_t"
+    }
+  },
+  "types": {
+    "attributes": {
+      "bytestring_t": {
+        "type": "string_t"
+      },
+      "file_hash_t": {
+        "type": "string_t"
+      },
+      "resource_uid_t": {
+        "type": "string_t"
+      },
+      "subnet_t": {
+        "type": "string_t"
+      },
+      "uuid_t": {
+        "type": "string_t"
+      }
+    }
+  }
+}

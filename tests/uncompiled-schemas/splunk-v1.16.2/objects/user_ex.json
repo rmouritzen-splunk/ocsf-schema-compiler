@@ -1,0 +1,75 @@
+{
+  "description": "The extended/enriched user object.",
+  "extends": "user",
+  "profiles": [
+    "splunk/ba"
+  ],
+  "attributes": {
+    "account": {
+      "description": "The user's account or the account associated with the user.",
+      "requirement": "optional"
+    },
+    "display_name": {
+      "description": "The display name of the user, as reported by the product.",
+      "requirement": "optional"
+    },
+    "email_addresses": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "end_date": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "forward_addr": {
+      "requirement": "optional"
+    },
+    "full_name": {
+      "description": "The full name of the user, as reported by the product.",
+      "requirement": "optional"
+    },
+    "home_folder": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "labels": {
+      "description": "The list of labels attached to the user.",
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "location": {
+      "description": "The geographical location of the user's office.",
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "managed_by": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "nicknames": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "phones": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "privileges": {
+      "description": "The user privileges.",
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "shell": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "start_date": {
+      "profile": "splunk/ba",
+      "requirement": "optional"
+    },
+    "uid_alt": {
+      "description": "The alternate user identifier. For example, the Active Directory user GUID or AWS user Principal ID.",
+      "requirement": "optional"
+    }
+  }
+}

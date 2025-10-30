@@ -1,0 +1,32 @@
+{
+  "caption": "Categories",
+  "name": "category",
+  "description": "Initial working list of categories (work in progress).",
+  "attributes": {
+    "system": {
+      "caption": "System Activity",
+      "description": "System Activity events.",
+      "uid": 1
+    },
+    "findings": {
+      "caption": "Findings",
+      "description": "Findings events report findings, detections, and possible resolutions of malware, anomalies, or other actions performed by security products.",
+      "uid": 2
+    },
+    "audit": {
+      "caption": "Audit Activity",
+      "description": "Audit events relate to the supervision of the system's access control model. Examples of such events are the success or failure of authentication, granting of authority, password change, entity change, privileged use, system state change, and resource access.",
+      "uid": 3
+    },
+    "network": {
+      "caption": "Network Activity",
+      "description": "Network Activity events.",
+      "uid": 4
+    },
+    "inventory": {
+      "caption": "Configuration/Inventory",
+      "description": "Configuration and Inventory Activity events.",
+      "uid": 5
+    }
+  }
+}

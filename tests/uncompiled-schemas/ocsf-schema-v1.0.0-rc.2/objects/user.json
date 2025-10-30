@@ -1,0 +1,87 @@
+{
+  "caption": "User",
+  "observable": 21,
+  "name": "user",
+  "description": "The user object describes the identity of a user.",
+  "extends": "object",
+  "attributes": {
+    "account_type": {
+      "requirement": "optional"
+    },
+    "account_type_id": {
+      "requirement": "optional"
+    },
+    "account_uid": {
+      "requirement": "optional"
+    },
+    "credential_uid": {
+      "requirement": "optional"
+    },
+    "domain": {
+      "description": "The domain where the user is defined. For example: the LDAP or Active Directory domain.",
+      "requirement": "optional"
+    },
+    "email_addr": {
+      "requirement": "optional"
+    },
+    "groups": {
+      "description": "The administrative groups to which the user belongs.",
+      "requirement": "optional"
+    },
+    "name": {
+      "description": "The username. For example, <i>janedoe1</i>.",
+      "requirement": "recommended",
+      "type": "username_t"
+    },
+    "org_uid": {
+      "requirement": "optional"
+    },
+    "type": {
+      "description": "The type of the user. For example, System, AWS IAM User, etc.",
+      "caption": "Type",
+      "requirement": "optional"
+    },
+    "type_id": {
+      "description": "The account type identifier.",
+      "enum": {
+        "0": {
+          "caption": "Unknown"
+        },
+        "1": {
+          "description": "Regular user account.",
+          "caption": "User"
+        },
+        "2": {
+          "description": "Admin/root user account.",
+          "caption": "Admin"
+        },
+        "3": {
+          "description": "System account. For example, Windows computer accounts with a trailing dollar sign ($).",
+          "caption": "System"
+        },
+        "99": {
+          "caption": "Other"
+        }
+      },
+      "caption": "Type ID",
+      "requirement": "optional",
+      "name": "integer_t"
+    },
+    "uid": {
+      "description": "The unique user identifier. For example, AWS PrincipalID or Windows user SID.",
+      "caption": "User ID",
+      "requirement": "recommended"
+    },
+    "uuid": {
+      "description": "The universally unique identifier of the user. For example, AWS ARN or Windows user GUID.",
+      "caption": "Unique User ID",
+      "requirement": "optional"
+    }
+  },
+  "constraints": {
+    "at_least_one": [
+      "name",
+      "uid"
+    ]
+  }
+}

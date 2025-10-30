@@ -1,0 +1,38 @@
+{
+  "caption": "Kernel Resource",
+  "name": "kernel",
+  "description": "The kernel resource object describes the name and type of a kernel resource.",
+  "extends": "object",
+  "attributes": {
+    "is_system": {
+      "requirement": "optional"
+    },
+    "name": {
+      "description": "The name of the kernel resource.",
+      "requirement": "required"
+    },
+    "path": {
+      "description": "The full path of the kernel resource.",
+      "requirement": "optional"
+    },
+    "system_call": {
+      "requirement": "optional"
+    },
+    "type": {
+      "description": "The type of the kernel resource.",
+      "requirement": "optional"
+    },
+    "type_id": {
+      "description": "The type of the kernel resource.",
+      "enum": {
+        "1": {
+          "caption": "Shared Mutex"
+        },
+        "2": {
+          "caption": "System Call"
+        }
+      },
+      "requirement": "required"
+    }
+  }
+}

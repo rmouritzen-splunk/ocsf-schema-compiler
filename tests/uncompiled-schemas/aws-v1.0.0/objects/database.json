@@ -1,0 +1,77 @@
+{
+  "caption": "Database",
+  "description": "Database object represents a database instance (e.g. MySQL, PostgreSQL, Oracle, etc.).",
+  "extends": "database",
+  "name": "database",
+  "attributes": {
+    "cluster_uid": {
+      "description": "The database cluster identifier (e.g. cluster-1234567890abcdef0).",
+      "requirement": "optional"
+    },
+    "db_endpoint": {
+      "description": "The database endpoint <code>(e.g. mydb.123456789012.us-west-2.rds.amazonaws.com)</code>.",
+      "requirement": "recommended"
+    },
+    "encryption_details": {
+      "description": "The database encryption details.",
+      "requirement": "recommended"
+    },
+    "engine": {
+      "description": "The database engine name (e.g. mysql).",
+      "requirement": "optional"
+    },
+    "is_encrypted": {
+      "description": "Whether the database is encrypted (e.g. true).",
+      "requirement": "recommended"
+    },
+    "is_iam_authentication": {
+      "description": "Whether IAM authentication is enabled (e.g. true).",
+      "requirement": "optional"
+    },
+    "is_public": {
+      "description": "Whether the database is publicly accessible (e.g. true).",
+      "requirement": "recommended"
+    },
+    "port": {
+      "description": "The database port number (e.g. 3306).",
+      "requirement": "optional"
+    },
+    "security_groups": {
+      "description": "Array of VPC security groups associated with the database instance.",
+      "requirement": "recommended"
+    },
+    "snapshot_details": {
+      "description": "The database snapshot details.",
+      "requirement": "optional"
+    },
+    "status": {
+      "description": "The database status (e.g. available).",
+      "requirement": "recommended"
+    },
+    "subnet_group": {
+      "description": "A database subnet group is a collection of subnets in a VPC designated for your database instance.",
+      "requirement": "optional"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    },
+    "user": {
+      "description": "The database user (e.g. admin).",
+      "requirement": "optional"
+    },
+    "version": {
+      "description": "The database version (e.g. 5.7.38).",
+      "requirement": "optional"
+    }
+  },
+  "constraints": {
+    "at_least_one": ["name", "uid", "uid_alt"]
+  },
+  "references": [
+    {
+      "description": "AWS Databases",
+      "url": "https://docs.aws.amazon.com/AmazonRDS/latest/gettingstartedguide/what-is-rds.html"
+    }
+  ]
+}

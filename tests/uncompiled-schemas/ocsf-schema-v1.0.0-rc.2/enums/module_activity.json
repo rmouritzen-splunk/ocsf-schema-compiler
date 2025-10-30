@@ -1,0 +1,10 @@
+{
+  "enum": {
+    "1": {
+      "caption": "Load"
+    },
+    "2": {
+      "caption": "Unload"
+    }
+  }
+}

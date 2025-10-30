@@ -1,0 +1,18 @@
+{
+  "caption": "Attack",
+  "name": "attack",
+  "description": "The attack object describes the technique and associated tactics related to an attack.",
+  "extends": "object",
+  "attributes": {
+    "tactics": {
+      "requirement": "required"
+    },
+    "technique": {
+      "requirement": "required"
+    },
+    "version": {
+      "description": "The ATT&CK Matrix version.",
+      "requirement": "required"
+    }
+  }
+}

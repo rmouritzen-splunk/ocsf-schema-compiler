@@ -1,0 +1,45 @@
+{
+  "name": "process_activity",
+  "caption": "Process Activity",
+  "description": "Process Activity events report when a process launches, injects, opens or terminates another process, successful or otherwise.",
+  "extends": "system",
+  "uid": 7,
+  "attributes": {
+    "activity_id": {
+      "$include": "enums/process_activity.json"
+    },
+    "actor": {
+      "description": "The actor that performed the activity on the target <code>process</code>. For example, the process that started a new process or injected code into another process."
+    },
+    "actual_permissions": {
+      "group": "primary",
+      "requirement": "optional"
+    },
+    "exit_code": {
+      "group": "primary",
+      "requirement": "optional"
+    },
+    "injection_type": {
+      "group": "primary",
+      "requirement": "optional"
+    },
+    "injection_type_id": {
+      "group": "primary",
+      "requirement": "optional"
+    },
+    "module": {
+      "description": "The module that was injected by the actor process.",
+      "group": "primary",
+      "requirement": "optional"
+    },
+    "process": {
+      "description": "The process that was launched, injected into, opened, or terminated.",
+      "group": "primary",
+      "requirement": "required"
+    },
+    "requested_permissions": {
+      "group": "primary",
+      "requirement": "optional"
+    }
+  }
+}

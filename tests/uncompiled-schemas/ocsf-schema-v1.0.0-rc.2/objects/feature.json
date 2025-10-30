@@ -1,0 +1,23 @@
+{
+  "caption": "Feature",
+  "name": "feature",
+  "description": "The feature object describes a feature of a software product.",
+  "extends": "object",
+  "attributes": {
+    "name": {
+      "caption": "Feature Name",
+      "description": "The name of the product feature.",
+      "requirement": "recommended"
+    },
+    "uid": {
+      "caption": "Feature ID",
+      "description": "The unique identifier of the product feature.",
+      "requirement": "recommended"
+    },
+    "version": {
+      "caption": "Feature Version",
+      "description": "The version of the product feature.",
+      "requirement": "recommended"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "caption": "HTTP Response",
+  "name": "http_response",
+  "description": "The HTTP Response Object details a response from a web server to a requester.",
+  "extends": "object",
+  "attributes": {
+    "code": {
+      "description": "The numeric code sent from the web server to the requester.",
+      "requirement": "required"
+    },
+    "content_type": {
+      "requirement": "optional"
+    },
+    "latency": {
+      "requirement": "optional"
+    },
+    "length": {
+      "requirement": "optional"
+    },
+    "message": {
+      "requirement": "optional"
+    },
+    "status": {
+      "requirement": "optional",
+      "description": "The response status. For example: Kubernetes responseStatus.status."
+    }
+  }
+}

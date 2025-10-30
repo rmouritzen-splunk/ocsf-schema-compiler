@@ -1,0 +1,23 @@
+{
+  "description": "The attributes that identify security controls such as malware or policy violations.",
+  "meta": "profile",
+  "caption": "Security Control",
+  "name": "security_control",
+  "annotations": {
+    "group": "primary"
+  },
+  "attributes": {
+    "attacks": {
+      "requirement": "recommended"
+    },
+    "disposition": {
+      "requirement": "optional"
+    },
+    "disposition_id": {
+      "requirement": "required"
+    },
+    "malware": {
+      "requirement": "optional"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "caption": "Endpoint",
+  "description": "The Device object represents an addressable computer system or host, which is typically connected to a computer network and participates in the transmission or processing of data within the computer network.",
+  "extends": "endpoint",
+  "name": "endpoint",
+  "attributes": {
+    "hosted_zone_uid": {
+      "description": "The hosted zone of the endpoint <code>(e.g. The Route 53 hosted zone UID)</code>,",
+      "requirement": "optional"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    }
+  },
+  "constraints": {
+    "at_least_one": [
+      "ip",
+      "uid",
+      "name",
+      "hostname",
+      "instance_uid",
+      "interface_uid",
+      "interface_name",
+      "uid_alt"
+    ]
+  }
+}

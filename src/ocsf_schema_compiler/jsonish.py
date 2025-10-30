@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Callable, Any
 
-from exceptions import SchemaException
+from ocsf_schema_compiler.exceptions import SchemaException
 
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
@@ -89,7 +89,9 @@ def read_structured_items(
     return items
 
 
-def read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObject, JObject]:
+def read_patchable_structured_items(
+    base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
+) -> tuple[JObject, JObject]:
     """
     Read schema "patchable" structured items found in `kind` directory under `base_path`, recursively, and returns
     dataclass with unprocessed items and patches. Extension classes and objects are patchable structured items. Items
@@ -142,6 +144,8 @@ def read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObject
                                               f' file: {file_path}')
                     else:
                         patches[patch_name] = obj
+                        if item_callback_fn:
+                            item_callback_fn(file_path, obj)
                 else:
                     # This is a normal definition.
                     if name in items:
@@ -151,5 +155,7 @@ def read_patchable_structured_items(base_path: Path, kind: str) -> tuple[JObject
                                               f' "{existing.get("caption", "")}", file: {file_path}')
                     else:
                         items[name] = obj
+                        if item_callback_fn:
+                            item_callback_fn(file_path, obj)
 
     return items, patches

@@ -1,0 +1,259 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "attach_time": {
+      "caption": "Attach Time",
+      "description": "The time stamp when the volume was attached to the instance",
+      "type": "timestamp_t"
+    },
+    "attachments": {
+      "caption": "List of Attachments",
+      "description": "A list of attachments to the resource",
+      "type": "attachment",
+      "is_array": true
+    },
+    "cidr_block": {
+      "caption": "CIDR Block",
+      "description": "The CIDR block of the subnet",
+      "type": "subnet_t"
+    },
+    "cloud_function": {
+      "caption": "Cloud Function",
+      "description": "The cloud function that processes events",
+      "type": "cloud_function"
+    },
+    "cluster_members": {
+      "caption": "Database Cluster Members",
+      "description": "List of database instance that are part of the database cluster.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "cluster_uid": {
+      "caption": "Cluster UID",
+      "description": "The unique identifier for the container cluster",
+      "type": "string_t"
+    },
+    "db_cluster": {
+      "caption": "Database Cluster",
+      "description": "The details of the database cluster.",
+      "type": "db_cluster"
+    },
+    "db_endpoint": {
+      "caption": "Database Endpoint",
+      "description": "The database endpoint that is associated with the resource",
+      "type": "network_endpoint"
+    },
+    "db_user": {
+      "caption": "Database User",
+      "description": "The details of the user account that is the database administrator (e.g. admin).",
+      "type": "user"
+    },
+    "engine": {
+      "caption": "Engine",
+      "description": "The engine that is associated with the database",
+      "type": "string_t"
+    },
+    "handler": {
+      "caption": "Handler",
+      "description": "The method in the cloud function that processes events",
+      "type": "string_t"
+    },
+    "hosted_zone_uid": {
+      "caption": "Hosted Zone UID",
+      "description": "The unique identifier of a hosted zone <code>(e.g. AWS Route 53 Hosted Zone)</code>.",
+      "type": "string_t"
+    },
+    "imported_time": {
+      "caption": "Imported Date and Time",
+      "description": "The timestamp when the certificate was imported",
+      "type": "timestamp_t"
+    },
+    "in_use_by": {
+      "caption": "In Use By",
+      "description": "List of resources currently using this certificate",
+      "type": "string_t",
+      "is_array": true
+    },
+    "in_use_count": {
+      "caption": "In Use Count",
+      "description": "Count of resources using this image. See specific usage.",
+      "type": "integer_t"
+    },
+    "instance_profile": {
+      "caption": "Instance Profile",
+      "description": "Information about the instance profile associated with the compute resource, which provides the resource with permissions to interact with other services",
+      "type": "instance_profile"
+    },
+    "instance_profiles": {
+      "caption": "Instance Profiles",
+      "description": "A list of instance profiles associated with the compute resource, which provides the resource with permissions to interact with other services",
+      "type": "instance_profile",
+      "is_array": true
+    },
+    "ip_addresses": {
+      "caption": "IP Address Array ",
+      "description": "An array of IP addresses (IPv4 or IPv6) associated with the instance. These may include both public and private IP addresses.",
+      "type": "ip_t",
+      "is_array": true
+    },
+    "ip_count": {
+      "caption": "IP Count",
+      "description": "The number of IP addresses in the subnet",
+      "type": "integer_t"
+    },
+    "is_delete_on_termination": {
+      "caption": "Is Delete on Termination",
+      "description": "Specifies whether the volume will be deleted on instance termination",
+      "type": "boolean_t"
+    },
+    "is_iam_authentication": {
+      "caption": "IAM Database Authentication Enabled",
+      "description": "Indicates if IAM database authentication is enabled",
+      "type": "boolean_t"
+    },
+    "key_usages": {
+      "caption": "Key Usages",
+      "description": " Key usage defines the purpose of the key contained in the certificate. ",
+      "type": "string_t",
+      "enum": {
+        "ANY": {
+          "caption": "ANY",
+          "description": "The public key can be used for any purpose."
+        },
+        "CERTIFICATE_SIGNING": {
+          "caption": "CERTIFICATE_SIGNING",
+          "description": "Used when the public key is used for verifying a signature on certificates."
+        },
+        "CRL_SIGNING": {
+          "caption": "CRL_SIGNING",
+          "description": "Used when the public key is used for verifying a signature on Certificate Revocation Lists."
+        },
+        "CUSTOM": {
+          "caption": "CUSTOM",
+          "description": "A custom usage defined by the event source."
+        },
+        "DATA_ENCIPHERMENT": {
+          "caption": "DATA_ENCIPHERMENT",
+          "description": "Used when the public key is used for directly encrypting user data."
+        },
+        "DECIPHER_ONLY": {
+          "caption": "DECIPHER_ONLY",
+          "description": "Used only for deciphering data during key agreement."
+        },
+        "DIGITAL_SIGNATURE": {
+          "caption": "DIGITAL_SIGNATURE",
+          "description": "Used when the public key is used for verifying digital signatures."
+        },
+        "ENCIPHER_ONLY": {
+          "caption": "ENCIPHER_ONLY",
+          "description": "Used only for enciphering data during key agreement."
+        },
+        "KEY_AGREEMENT": {
+          "caption": "KEY_AGREEMENT",
+          "description": "Used when the sender and receiver of the public key need to derive a key without using encryption."
+        },
+        "KEY_ENCIPHERMENT": {
+          "caption": "KEY_ENCIPHERMENT",
+          "description": "Used when the public key is used for encrypting private or secret keys."
+        },
+        "NON_REPUDIATION": {
+          "caption": "NON_REPUDIATION",
+          "description": "Used when the public key is used to verify digital signatures used for non-repudiation services."
+        }
+      },
+      "references": [
+        {
+          "description": "RFC 5280",
+          "url": "https://www.rfc-editor.org/rfc/rfc5280"
+        }
+      ],
+      "is_array": true
+    },
+    "last_used_time": {
+      "caption": "Last Used time",
+      "description": "The time stamp when the resource was last used. See specific usage.",
+      "type": "timestamp_t"
+    },
+    "launch_time": {
+      "caption": "Launch Time",
+      "description": "The reported time a device or instance was launched",
+      "type": "timestamp_t"
+    },
+    "layers": {
+      "caption": "Cloud Function Layers",
+      "description": "The list of layers associated with the cloud function.",
+      "type": "layer",
+      "is_array": true
+    },
+    "network_interface": {
+      "caption": "Network Interface",
+      "description": "The Network Interface object describes the type and associated attributes of a physical or virtual network interface.",
+      "type": "network_interface"
+    },
+    "platform": {
+      "caption": "Platform Name",
+      "description": "The operating system platform of the image. See specific usage.",
+      "type": "string_t"
+    },
+    "registry_uid": {
+      "caption": "Registry UID",
+      "description": "The unique identifier of a container registry (e.g. AWS ECR Registry ID).",
+      "type": "string_t"
+    },
+    "renewable_eligibility": {
+      "caption": "Renewable Eligibility",
+      "description": "Indicates if the certificate is eligible for renewal",
+      "type": "string_t"
+    },
+    "repository_name": {
+      "caption": "Repository Name",
+      "description": "The name of the repository. See specific usage.",
+      "type": "string_t"
+    },
+    "security_groups": {
+      "caption": "Array of Security groups",
+      "description": "The array of security groups associated with the resource",
+      "type": "security_group",
+      "is_array": true
+    },
+    "snapshot_details": {
+      "caption": "Snapshot Details",
+      "description": "The details of the database snapshot.",
+      "type": "snapshot_details"
+    },
+    "snapshot_id": {
+      "caption": "Snapshot ID",
+      "description": "The storage device snapshot identifier <code>(e.g. snap-1234567890abcdef0).</code>",
+      "type": "string_t"
+    },
+    "storage_device": {
+      "caption": "Storage Device",
+      "description": "The storage device that is attached to the instance",
+      "type": "storage_device"
+    },
+    "subnet_group": {
+      "caption": "Subnet Group",
+      "description": "The subnet group that is associated with the database",
+      "type": "subnet_group"
+    },
+    "subnet_info": {
+      "caption": "Subnet Information",
+      "description": "Describes the supporting information about a subnet.",
+      "type": "subnet_info"
+    },
+    "subnet_info_list": {
+      "caption": "List of Subnet Information",
+      "description": "A list of supporting information about a subnet.",
+      "type": "subnet_info",
+      "is_array": true
+    },
+    "zones": {
+      "caption": "List of Availability Zones",
+      "description": "A list of availability zones",
+      "type": "string_t",
+      "is_array": true
+    }
+  }
+}

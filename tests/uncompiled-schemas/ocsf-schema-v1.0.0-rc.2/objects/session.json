@@ -1,0 +1,34 @@
+{
+  "description": "This object describes details about an authenticated session. e.g. Session Creation Time, Session Issuer.",
+  "caption": "Session",
+  "name": "session",
+  "extends": "object",
+  "attributes": {
+    "created_time": {
+      "description": "The time when the session was created.",
+      "requirement": "recommended"
+    },
+    "issuer": {
+      "description": "The identifier of the session issuer.",
+      "requirement": "recommended"
+    },
+    "credential_uid": {
+      "requirement": "optional"
+    },
+    "expiration_time": {
+      "description": "The session expiration time.",
+      "requirement": "optional"
+    },
+    "mfa": {
+      "requirement": "optional"
+    },
+    "uid": {
+      "description": "Unique identifier of the session",
+      "requirement": "recommended"
+    },
+    "uuid": {
+      "description": "The universally unique ID of the user session",
+      "requirement": "optional"
+    }    
+  }
+}

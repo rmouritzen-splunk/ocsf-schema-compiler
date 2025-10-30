@@ -1,0 +1,22 @@
+{
+  "caption": "Network Activity",
+  "category": "network",
+  "description": "Network Activity events report network connection and traffic activity.",
+  "extends": "base_event",
+  "name": "network_activity",
+  "profiles": [
+    "host",
+    "security_control"
+  ],
+  "uid": 1,
+  "attributes": {
+    "$include": [
+      "includes/network.json",
+      "profiles/host.json",
+      "profiles/security_control.json"
+    ],
+    "activity_id": {
+      "$include": "enums/network_activity.json"
+    }
+  }
+}

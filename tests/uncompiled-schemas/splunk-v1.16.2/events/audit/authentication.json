@@ -1,0 +1,81 @@
+{
+  "description": "The extended Authentication class to add is_new_logon attribute and Windows Log profile (which are defined in rc.3).",
+  "extends": "authentication",
+  "profiles": [
+    "splunk/ba"
+  ],
+  "attributes": {
+    "activity_id": {
+      "enum": {
+        "1": {
+          "caption": "Logon",
+          "description": "A new logon session was requested."
+        },
+        "2": {
+          "caption": "Logoff",
+          "description": "A logon session was terminated and no longer exists."
+        },
+        "3": {
+          "caption": "Authentication Ticket",
+          "description": "A Kerberos authentication ticket (TGT) was requested."
+        },
+        "4": {
+          "caption": "Service Ticket Request",
+          "description": "A Kerberos service ticket was requested."
+        },
+        "5": {
+          "caption": "Service Ticket Renew",
+          "description": "A Kerberos service ticket was renewed."
+        },
+        "6": {
+          "caption": "Preauth",
+          "description": "A preauthentication stage was engaged."
+        }
+      }
+    },
+    "auth_factors": {
+      "group": "context",
+      "requirement": "optional"
+    },
+    "authentication_token": {
+      "description": "The authentication token, ticket, or assertion, e.g. <code>Kerberos</code>, <code>OIDC</code>, <code>SAML</code>.",
+      "group": "context",
+      "references": [
+        {
+          "description": "RFC 4120: The Kerberos Network Authentication Service (V5)",
+          "url": "https://www.rfc-editor.org/rfc/rfc4120"
+        },
+        {
+          "description": "OpenID Connect Core 1.0",
+          "url": "https://openid.net/specs/openid-connect-core-1_0.html"
+        },
+        {
+          "description": "The OASIS Security Assertion Markup Language (SAML) V2.0",
+          "url": "https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf"
+        }
+      ],
+      "requirement": "optional"
+    },
+    "dst_endpoint": {
+      "description": "The endpoint to which the authentication was targeted.",
+      "group": "primary",
+      "requirement": "recommended"
+    },
+    "mfa": {
+      "group": "primary",
+      "requirement": "recommended",
+      "@deprecated": {
+        "message": "Use the <code>is_mfa</code> attribute instead.",
+        "since": "1.0.0"
+      }
+    },
+    "is_mfa": {
+      "group": "primary",
+      "requirement": "recommended"
+    },
+    "is_new_logon": {
+      "group": "context",
+      "requirement": "optional"
+    }
+  }
+}

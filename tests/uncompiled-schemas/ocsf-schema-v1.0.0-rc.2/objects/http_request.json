@@ -1,0 +1,50 @@
+{
+  "caption": "HTTP Request",
+  "name": "http_request",
+  "description": "The HTTP Request Object details a request made to a web server.",
+  "extends": "object",
+  "attributes": {
+    "args": {
+      "requirement": "optional"
+    },
+    "http_headers": {
+      "requirement": "recommended"
+    },
+    "http_method": {
+      "requirement": "recommended"
+    },
+    "version": {
+      "caption": "HTTP Version",
+      "description": "The Hypertext Transfer Protocol (HTTP) version.",
+      "requirement": "recommended"
+    },
+    "prefix": {
+      "description": "Domain prefix.",
+      "requirement": "optional"
+    },
+    "referrer": {
+      "requirement": "optional"
+    },
+    "uid": {
+      "description": "The unique identifier of the http request.",
+      "requirement": "optional"
+    },
+    "user_agent": {
+      "requirement": "recommended"
+    },
+    "x_forwarded_for": {
+      "requirement": "optional"
+    },
+    "url": {
+      "description": "The URL object that pertains to the request.",
+      "requirement": "recommended"
+    }
+  },
+  "constraints": {
+    "at_least_one": [
+      "user_agent",
+      "url",
+      "hostname"
+    ]
+  }
+}

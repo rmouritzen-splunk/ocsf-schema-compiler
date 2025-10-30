@@ -1,7 +1,8 @@
 import json
 from typing import Any, Optional
 
-from jsonish import JObject, JValue
+from ocsf_schema_compiler.exceptions import SchemaException
+from ocsf_schema_compiler.jsonish import JObject
 
 
 def deep_merge(dest: dict, source: dict) -> None:
@@ -54,18 +55,35 @@ def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     return cls_uid * 100 + type_uid
 
 
-def shallow_jobject_differences(o1: JObject, o2: JObject) -> Optional[dict[str, list[JValue]]]:
-    if o1 == o2:
-        return None
-    all_keys = set(o1.keys()) | set(o2.keys())
-    diffs: dict[str, list[JValue]] = {}
-    for key in all_keys:
-        v1 = o1.get(key)
-        v2 = o2.get(key)
-        if v1 != v2:
-            diffs[key] = [v1, v2]
-    return diffs
-
-
 def pretty_json_encode(v: Any) -> str:
     return json.dumps(v, indent=4, sort_keys=True)
+
+
+def quote_string(s: Optional[str]) -> Optional[str]:
+    if s:
+        return f'"{s}"'
+    return None
+
+
+def requirement_to_rank(requirement: Optional[str]) -> int:
+    if requirement == "required":
+        return 3
+    if requirement == "recommended":
+        return 2
+    if requirement == "optional":
+        return 1
+    if requirement is None:
+        return 0
+    raise SchemaException(f'Unknown requirement: "{requirement}"')
+
+
+def rank_to_requirement(rank: int) -> Optional[str]:
+    if rank == 3:
+        return "required"
+    if rank == 2:
+        return "recommended"
+    if rank == 1:
+        return "optional"
+    if rank == 0:
+        return None
+    raise SchemaException(f'Unknown rank: {rank}')

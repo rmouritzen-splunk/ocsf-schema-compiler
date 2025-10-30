@@ -1,0 +1,50 @@
+{
+  "caption": "Email",
+  "description": "The Email object describes the email metadata such as sender, recipients, and direction.",
+  "name": "email",
+  "observable": 22,
+  "attributes": {
+    "cc": {
+      "requirement": "optional"
+    },
+    "delivered_to": {
+      "requirement": "optional"
+    },
+    "from": {
+      "requirement": "required"
+    },
+    "message_uid": {
+      "requirement": "recommended"
+    },
+    "raw_header": {
+      "requirement": "optional"
+    },
+    "reply_to": {
+      "requirement": "recommended"
+    },
+    "size": {
+      "description": "The size in bytes of the email, including attachments.",
+      "requirement": "recommended"
+    },
+    "smtp_from": {
+      "requirement": "recommended"
+    },
+    "smtp_to": {
+      "requirement": "recommended"
+    },
+    "subject": {
+      "requirement": "required"
+    },
+    "to": {
+      "requirement": "required"
+    },
+    "x_originating_ip": {
+      "requirement": "optional"
+    },
+    "uid": {
+      "caption": "Email UID",
+      "description": "The email unique identifier.",
+      "requirement": "recommended"
+    }
+  }
+}

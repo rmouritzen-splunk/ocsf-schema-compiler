@@ -1,0 +1,30 @@
+{
+  "caption": "Network Interface",
+  "description": "Network Interface details and configuration",
+  "extends": "network_interface",
+  "name": "network_interface",
+  "attributes": {
+    "attachments": {
+      "description": "Information about the network interface attachments.",
+      "requirement": "recommended"
+    },
+    "security_groups": {
+      "description": "Array of security group unique identifiers associated with this network interface",
+      "requirement": "recommended"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    }
+  },
+  "constraints": {
+    "at_least_one": [
+      "hostname",
+      "ip",
+      "mac",
+      "name",
+      "uid",
+      "uid_alt"
+    ]
+  }
+}

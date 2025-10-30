@@ -1,0 +1,16 @@
+{
+  "caption": "Identity Provider",
+  "name": "idp",
+  "description": "This object describes details about the Identity Provider used.",
+  "extends": "object",
+  "attributes": {
+    "name": {
+      "description":"Identifier/Name of the Identity provider",
+      "requirement": "optional"
+    },
+    "uid": {
+      "description":"Unique Idenfifier of the Identity provider",
+      "requirement": "optional"
+    }
+  }
+}

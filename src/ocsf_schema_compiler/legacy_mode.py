@@ -1,4 +1,4 @@
-from jsonish import JObject
+from ocsf_schema_compiler.jsonish import JObject
 
 
 def to_extension_scoped_name(name: str, item: JObject) -> str:

@@ -1,0 +1,60 @@
+{
+  "caption": "Module",
+  "name": "module",
+  "description": "The module object describes the load attributes of a module.",
+  "extends": "object",
+  "attributes": {
+    "base_address": {
+      "requirement": "recommended"
+    },
+    "file": {
+      "description": "The module file object.",
+      "requirement": "recommended"
+    },
+    "function_name": {
+      "requirement": "optional"
+    },
+    "load_type": {
+      "requirement": "optional"
+    },
+    "load_type_id": {
+      "enum": {
+        "0": {
+          "caption": "Unknown"
+        },
+        "1": {
+          "description": "A normal module loaded by the normal windows loading mechanism i.e. LoadLibrary.",
+          "caption": "Standard"
+        },
+        "2": {
+          "description": "A module loaded in a way avoidant of normal windows procedures. i.e. Bootstrapped Loading/Manual Dll Loading.",
+          "caption": "Non Standard"
+        },
+        "3": {
+          "description": "A raw module in process memory that is READWRITE_EXECUTE and had a thread started in its range.",
+          "caption": "ShellCode"
+        },
+        "4": {
+          "description": "A memory mapped file, typically created with CreatefileMapping/MapViewOfFile.",
+          "caption": "Mapped"
+        },
+        "5": {
+          "description": "A module loaded in a non standard way. However, GetModuleFileName succeeds on this allocation.",
+          "caption": "NonStandard Backed"
+        },
+        "99": {
+          "caption": "Other"
+        }
+      },
+      "requirement": "required"
+    },
+    "start_address": {
+      "requirement": "recommended"
+    },
+    "type": {
+      "description": "The module type.",
+      "requirement": "recommended"
+    }
+  }
+}
+

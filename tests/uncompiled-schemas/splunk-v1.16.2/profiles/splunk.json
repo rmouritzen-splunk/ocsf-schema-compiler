@@ -1,0 +1,32 @@
+{
+  "caption": "Splunk",
+  "description": "This profile defines the Splunk internal attributes.",
+  "meta": "profile",
+  "name": "splunk",
+  "attributes": {
+    "host": {
+      "requirement": "required"
+    },
+    "index": {
+      "requirement": "reserved"
+    },
+    "linecount": {
+      "requirement": "reserved"
+    },
+    "punct": {
+      "requirement": "reserved"
+    },
+    "source": {
+      "requirement": "required"
+    },
+    "source_type": {
+      "requirement": "required"
+    },
+    "splunk_server": {
+      "requirement": "reserved"
+    },
+    "timestamp": {
+      "requirement": "recommended"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "description": "API object details information pertaining to the API calls",
+  "caption": "API Details",
+  "name": "api",
+  "extends": "object",
+  "attributes": {
+    "operation": {
+      "requirement": "required"
+    },
+    "request": {
+      "description": "Details pertaining to the API request.",
+      "requirement": "recommended"
+    },
+    "response": {
+      "description": "Details pertaining to the API response.",
+      "requirement": "recommended"
+    },
+    "service": {
+      "description": "The information pertaining to the API service.",
+      "requirement": "optional"
+    },
+    "version": {
+      "description": "The version of the API service.",
+      "requirement": "optional"
+    }
+  }
+}

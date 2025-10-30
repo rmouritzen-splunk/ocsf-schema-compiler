@@ -1,0 +1,16 @@
+{
+  "caption": "HTTP Header",
+  "name": "http_header",
+  "description": "The HTTP Header Object",
+  "extends": "object",
+  "attributes": {
+    "name": {
+      "description": "The name of the header",
+      "requirement": "required"
+    },
+    "value": {
+      "description": "The value of the header",
+      "requirement": "required"
+    }
+  }
+}

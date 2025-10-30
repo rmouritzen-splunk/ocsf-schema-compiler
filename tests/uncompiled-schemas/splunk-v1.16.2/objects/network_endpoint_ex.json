@@ -1,0 +1,29 @@
+{
+  "description": "The extended/enriched network_endpoint object.",
+  "extends": "network_endpoint",
+  "profiles": [
+    "splunk/ba"
+  ],
+  "attributes": {
+    "autonomous_system": {
+      "requirement": "optional"
+    },
+    "os": {
+      "description": "The endpoint operating system.",
+      "requirement": "optional"
+    }
+  },
+  "constraints": {
+    "at_least_one": [
+      "ip",
+      "uid",
+      "name",
+      "hostname",
+      "svc_name",
+      "instance_uid",
+      "interface_uid",
+      "interface_name",
+      "domain"
+    ]
+  }
+}

@@ -5,7 +5,7 @@ from pathlib import Path
 from sys import stderr
 from time import perf_counter
 
-from compiler import SchemaCompiler
+from ocsf_schema_compiler.compiler import SchemaCompiler
 
 logger = logging.getLogger(__name__)
 

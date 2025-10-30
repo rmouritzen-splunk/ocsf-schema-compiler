@@ -1,0 +1,97 @@
+{
+  "caption": "Resource Details",
+  "description": "The Resource Details object describes details about resources that were affected by the activity/event.",
+  "extends": "resource_details",
+  "name": "resource_details",
+  "attributes": {
+    "$include": ["profiles/cloud_resources.json"],
+    "cloud_function": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "cloud_partition": {
+      "profile": "cloud",
+      "requirement": "recommended"
+    },
+    "created_time": {
+      "description": "The time when the resource was created.",
+      "requirement": "recommended"
+    },
+    "database": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "databucket": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "db_cluster": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "device": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "image": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "ip": {
+      "description": "The IP address associated with the instance in either IPv4 or IPv6 format.",
+      "requirement": "recommended"
+    },
+    "ip_addresses": {
+      "description": "An array of IP addresses (IPv4 or IPv6) associated with the device. These may include both public and private IP addresses.",
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "name": {
+      "description": "The resource name <code>(e.g. my-instance)</code>.",
+      "requirement": "recommended"
+    },
+    "network_interface": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "region": {
+      "description": "The cloud region of the resource.",
+      "profile": "cloud",
+      "requirement": "recommended"
+    },
+    "storage_device": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "subnet_info": {
+      "description": "Details about the subnet where the resource is located.",
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "type": {
+      "description": "The resource type <code>(e.g. AWS::EC2::Instance)</code>.",
+      "requirement": "required"
+    },
+    "uid": {
+      "description": "The resource unique identifier <code>(e.g. i-1234567890abcdef0)</code>.",
+      "requirement": "recommended"
+    },
+    "uid_alt": {
+      "description": "This is the Amazon Resource Name (ARN) of the resource.",
+      "requirement": "recommended"
+    },
+    "user": {
+      "profile": "aws/cloud_resources",
+      "requirement": "optional"
+    },
+    "vpc_uid": {
+      "description": "The VPC ID where the resource is located <code>(e.g. vpc-12345678900)</code>.",
+      "profile": "aws/cloud_resources",
+      "requirement": "recommended"
+    }
+  },
+  "constraints": {
+    "at_least_one": ["name", "uid", "uid_alt"]
+  },
+  "profiles": ["aws/cloud_resources"]
+}
