@@ -26,7 +26,6 @@ class TestExpectedChanges(unittest.TestCase):
     def test_current(self):
         compiler = SchemaCompiler(Path(BASE_DIR, 'uncompiled-schemas/ocsf-schema-v1.6.0'))
         schema = compiler.compile()
-
         baseline_schema = read_json_object_file(Path(BASE_DIR, 'compiled-baselines/schema-v1.6.0.json'))
         ok, diffs = diff_objects(schema, baseline_schema, diff_callback=diff_callback)
         self.assertTrue(ok, f"schema should match baseline:\n{formatted_diffs(diffs)}")
