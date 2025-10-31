@@ -1436,14 +1436,17 @@ class SchemaCompiler:
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         item_attributes = item.setdefault("attributes", {})
         for item_attribute_name, item_attribute in item_attributes.items():
-            enriched_link = deepcopy(link)
-            # TODO: Are "attribute_keys" used for all types or only object types? (Seems like only object types.)
-            #       Once everything is working, try only setting "attribute_keys" for object types.
-            enriched_link["attribute_keys"] = [item_attribute_name]
             if item_attribute_name in dictionary_attributes:
                 dictionary_attribute = dictionary_attributes[item_attribute_name]
+
+                # Create copy of link to avoid polluting original in case at least one attribute is an object type.
+                attribute_link = deepcopy(link)
+                # attribute_keys is only used to track the different attribute name uses of object types.
+                # We don't track the various attribute names that use dictionary types.
+                if "object_type" in dictionary_attribute:
+                    attribute_link["attribute_keys"] = [item_attribute_name]
                 links = dictionary_attribute.setdefault("_links", [])
-                links.append(enriched_link)
+                links.append(attribute_link)
             else:
                 raise SchemaException(f'{kind} "{item_name}" uses undefined attribute "{item_attribute_name}"')
 
@@ -1503,8 +1506,7 @@ class SchemaCompiler:
             for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("type") == "timestamp_t":
                     sibling = deepcopy(attribute)
-                    # TODO: Fix up attribute_keys in _links if they are actually used for attributes
-                    #       (Elixir code does NOT fix up)
+                    # No need to fix up attribute_keys as they are not used for dictionary types
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
                     additions[self._make_datetime_attribute_name(attribute_name)] = sibling
