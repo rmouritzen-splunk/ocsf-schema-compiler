@@ -164,8 +164,6 @@ class SchemaCompiler:
 
         self._finish_attributes()
 
-        # TODO: Reevaluate uses of "_source" and "_source_patched". Some may not be used in schema browser.
-
         output = self._create_compile_output()
 
         if self._error_count and self._warning_count:
@@ -898,7 +896,7 @@ class SchemaCompiler:
 
         if self.browser_mode:
             self._add_source_to_item_attributes(self._classes)
-            self._add_source_to_patch_item_attributes(self._class_patches, "class")
+            self._add_source_to_patch_item_attributes(self._class_patches)
         self._resolve_patches(self._classes, self._class_patches, "class")
         self._resolve_extends(self._classes, "class")
 
@@ -1005,7 +1003,7 @@ class SchemaCompiler:
 
         if self.browser_mode:
             self._add_source_to_item_attributes(self._objects)
-            self._add_source_to_patch_item_attributes(self._object_patches, "object")
+            self._add_source_to_patch_item_attributes(self._object_patches)
         self._resolve_patches(self._objects, self._object_patches, "object")
         self._resolve_extends(self._objects, "object")
 
@@ -1211,23 +1209,11 @@ class SchemaCompiler:
                 attribute["_source"] = item_name
 
     @staticmethod
-    def _add_source_to_patch_item_attributes(patch_dict: PatchDict, kind: str) -> None:
+    def _add_source_to_patch_item_attributes(patch_dict: PatchDict) -> None:
         for patch_name, patches in patch_dict.items():
             for patch in patches:
                 for attribute_name, attribute in patch.setdefault("attributes", {}).items():
-                    try:
-                        attribute["_source"] = patch_name
-                        # Because attribute_source done before patching with _resolve_patches, we need to capture the
-                        # final "patched" type for use by the UI when displaying the source. Other uses of "_source"
-                        # require the original pre-patched source.
-                        attribute["_source_patched"] = patch["extends"]
-                    except TypeError as e:
-                        raise SchemaException(f'Invalid attribute type in "{attribute_name}"'
-                                              f' of extension "{patch["extension"]}" {kind} patch "{patch_name}":'
-                                              f' expected object, but got {json_type_from_value(attribute)}, ') from e
-                    except KeyError as e:
-                        raise SchemaException(f'Attribute "extends" missing in "{attribute_name}" of extension'
-                                              f' "{patch["extension"]}" {kind} patch "{patch_name}"') from e
+                    attribute["_source"] = patch_name
 
     def _resolve_patches(self, items: JObject, patches: PatchDict, kind: str) -> None:
         for patch_name, patch_list in patches.items():
