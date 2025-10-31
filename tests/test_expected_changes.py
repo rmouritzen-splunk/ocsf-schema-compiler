@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).parent
 # In this example, we've added support for multiple profiles to affect a class or object attribute, changing class
 # and attributes that used to have a "profile" property with null or a string to a "profiles" attribute with a null
 # or a list of strings.
-@unittest.skip("skip example expected change test")
+@unittest.skip("skip example expected changes test")
 class TestExpectedChanges(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

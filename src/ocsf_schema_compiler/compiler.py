@@ -164,8 +164,6 @@ class SchemaCompiler:
 
         self._finish_attributes()
 
-        # TODO: Support item attributes affected by more than one profile / extension.
-        #       See _merge_attribute_detail.
         # TODO: Reevaluate uses of "_source" and "_source_patched". Some may not be used in schema browser.
 
         output = self._create_compile_output()
@@ -199,6 +197,8 @@ class SchemaCompiler:
         self._objects = read_structured_items(self.schema_path, "objects",
                                               item_callback_fn=self._upgrade_attribute_profiles)
         self._base_profiles = read_structured_items(self.schema_path, "profiles", item_callback_fn=self._cache_profile)
+        self._validate_base_profiles()
+
         self._resolve_includes()
 
     def _read_version(self) -> None:
@@ -230,6 +230,16 @@ class SchemaCompiler:
     def _cache_profile(self, path: Path, profile: JObject) -> None:
         self._include_cache[path] = profile
 
+    def _validate_base_profiles(self) -> None:
+        # Before potentially resolving includes of profiles and then later finding issues
+        # we will validate profiles early so help identify the source of problems.
+        dictionary_attributes = self._dictionary.get("attributes", {})
+        for profile_name, profile in self._base_profiles.items():
+            for attribute_name, attribute in profile.get("attributes", {}).items():
+                if attribute_name not in dictionary_attributes:
+                    raise SchemaException(f'Attribute "{attribute_name}" in base schema profile "{profile_name}"'
+                                          f' is not a defined dictionary attribute')
+
     @staticmethod
     def _add_attribute_annotations(annotations: JObject, attribute: JObject) -> None:
         for key, value in annotations.items():
@@ -242,6 +252,9 @@ class SchemaCompiler:
 
     def _read_and_merge_extensions(self) -> None:
         extensions: list[Extension] = self._read_extensions()
+
+        self._validate_extension_profiles(extensions)
+
         self._resolve_extension_includes(extensions)
 
         for extension in extensions:
@@ -392,6 +405,29 @@ class SchemaCompiler:
             for profile in extension.profiles.values():
                 profile["extension"] = extension.name
                 profile["extension_id"] = extension.uid
+
+    def _validate_extension_profiles(self, extensions: list[Extension]) -> None:
+        # Before potentially resolving includes of profiles and then later finding issues
+        # we will validate profiles early so help identify the source of problems.
+        base_dictionary_attributes = self._dictionary.get("attributes", {})
+        for extension in extensions:
+            ext_dictionary_attributes = extension.dictionary.get("attributes", {})
+            for profile_name, profile in extension.profiles.items():
+                for attribute_name, attribute in profile.get("attributes", {}).items():
+                    if (attribute_name not in base_dictionary_attributes
+                        and attribute_name not in ext_dictionary_attributes):
+                        if extension.name == "splunk" and profile_name == "splunk" and self._version == "1.0.0-rc.2":
+                            # This is a known issue with the 1.0.0-rc.2 with "splunk" extension compilation, so we will
+                            # log this specific case.
+                            # TODO: Remove the unused splunk extension from the splunk extension. After this is fixed
+                            #       we can remove this special-case.
+                            self._warning('Ignoring know issue with "splunk" extension: attribute "%s" in profile'
+                                          ' "splunk" is not a defined dictionary attribute.'
+                                          '\n\n    PLEASE FIX by removing the unused "splunk" profile.\n',
+                                          attribute_name)
+                        else:
+                            raise SchemaException(f'Attribute "{attribute_name}" in extension "{extension.name}"'
+                                                  f' profile "{profile_name}" is not a defined dictionary attribute')
 
     def _fix_extension_profile_uses(self, extension: Extension) -> None:
         self._fix_extension_profile_uses_in_items(extension, extension.classes, "class")
@@ -745,10 +781,11 @@ class SchemaCompiler:
                 # with the base schema.
                 if "type" in ext_attribute:
                     if ext_attribute["type"] != base_attribute["type"]:
-                        if self._version == "1.0.0-rc.2" and ext_attribute_name == "duration":
-                            logger.info('Allowing type change of known issue with schema version 1.0.0-rc.2: base'
-                                        ' schema dictionary attribute "duration" is type "integer_t" but should be'
-                                        ' "long_t" (note: extension "splunk" fixes this issue)')
+                        if (self._version == "1.0.0-rc.2" and ext_attribute_name == "duration"
+                            and ext_attribute["extension"] == "splunk"):
+                            logger.info('Allowing fix of known issue in schema version 1.0.0-rc.2 by'
+                                        ' extension "splunk": base schema dictionary attribute "duration" is type'
+                                        ' "integer_t" but should be "long_t"')
                         else:
                             raise SchemaException(f'Extension "{extension.name}" {kind} attribute'
                                                   f' "{ext_attribute_name}" attempted to make unsafe type change;'
@@ -800,16 +837,17 @@ class SchemaCompiler:
                         base_desc = f'extension "{base_attribute["extension"]}"'
                     else:
                         base_desc = f'base schema'
-                    if self._version == "1.0.0-rc.2" and ext_attribute_name in {"bytestring_t", "file_hash_t",
-                                                                                "resource_uid_t", "subnet_t", "uuid_t"}:
-                        # Schema version 1.0.0-rc.2 has a known issue here. Some of its dictionary types are subtypes
+                    if (self._version == "1.0.0-rc.2" and ext_attribute["extension"] == "splunk"
+                        and ext_attribute_name
+                        in {"bytestring_t", "file_hash_t", "resource_uid_t", "subnet_t", "uuid_t"}):
+                        # Schema version 1.0.0-rc.2 has a known issue. Some of its dictionary types are subtypes
                         # that do not define their base type. We will allow extensions merge types in these cases.
                         # The "splunk" extension fixes actually does fix these issues.
                         # NOTE: primitives dictionary types "string_t" and "long_t" do _not_ define "type", so we
                         #       cannot do a general validation ensuring all types defines a "type".
-                        logger.info('Allowing change of known issue with schema version 1.0.0-rc.2: %s dictionary type'
-                                    ' "%s" is a subtype but does not define "type" (note: extension "splunk" fixes this'
-                                    ' issue)', base_desc, ext_attribute_name)
+                        logger.info('Allowing fix of known issue in schema version 1.0.0-rc.2 by extension "splunk":'
+                                    ' %s dictionary type "%s" is a subtype but does not define "type"',
+                                    base_desc, ext_attribute_name)
                         deep_merge(base_attribute, ext_attribute)
                     else:
                         raise SchemaException(f'Collision: extension "{extension.name}" {kind} dictionary type'
@@ -1213,9 +1251,8 @@ class SchemaCompiler:
                 else:
                     logger.info('Patch: %s is patching "%s" from base schema', context, base_name)
 
-                if self.browser_mode:
-                    # TODO: This is new. Useful?
-                    base.setdefault("_patched_by_extensions", []).append(patch["extension"])
+                # TODO: Add extension and extension_id, similar to attribute overwrites?
+                #       And perhaps also add an annotation saying this is patched?
 
                 self._merge_profiles(base, patch)
                 self._merge_attributes(base.setdefault("attributes", {}),
@@ -1277,12 +1314,13 @@ class SchemaCompiler:
             elif (source_key == "requirement"
                   and source_attribute.get("profiles") is not None and "profiles" in dest_attribute):
                 # Special merge of attribute affected by two profiles - requirement becomes max of both
-                # TODO: make sure this works as expected for AWS extension
                 dest_rank = requirement_to_rank(dest_attribute["requirement"])
                 source_rank = requirement_to_rank(source_attribute["requirement"])
                 dest_attribute["requirement"] = rank_to_requirement(max(dest_rank, source_rank))
             else:
                 # hopefully a safe merge - deep merge if dicts, or overwrite
+                # TODO: This will add "extension" and "extension_id" because they exist in source attribute
+                #       Consider tracking that this ends up in dest because of a merge / overwrite?
                 if isinstance(dest_attribute[source_key], dict) and isinstance(source_value, dict):
                     # TODO: Detect collisions? Perhaps with overwrite flag in utils.deep_merge?
                     deep_merge(dest_attribute[source_key], source_value)
@@ -1465,7 +1503,8 @@ class SchemaCompiler:
             for attribute_name, attribute in dictionary_attributes.items():
                 if attribute.get("type") == "timestamp_t":
                     sibling = deepcopy(attribute)
-                    # TODO: fix up attribute_keys in _links if they are actually used (Elixir code does NOT fix up)
+                    # TODO: Fix up attribute_keys in _links if they are actually used for attributes
+                    #       (Elixir code does NOT fix up)
                     sibling["type"] = "datetime_t"
                     sibling["type_name"] = "Datetime"
                     additions[self._make_datetime_attribute_name(attribute_name)] = sibling
@@ -1767,7 +1806,6 @@ class SchemaCompiler:
             self._finish_item_attributes(self._base_profiles, "profile")
             self._finish_item_attributes(self._extension_profiles, "profile")
         else:
-            # Strip profile attributes.
             for profile in self._base_profiles.values():
                 if "attributes" in profile:
                     del profile["attributes"]
@@ -1798,9 +1836,9 @@ class SchemaCompiler:
                     new_attributes[attribute_name] = new_attribute
                 else:
                     # This is a known issue with the 1.0.0-rc.2 with "splunk" extension compilation, so we will log
-                    # ignore and log this specific case, and assert otherwise.
-                    if "splunk" in self._extensions and self._version == "1.0.0-rc.2":
-                        logger.debug('_finish_item_attributes - ignoring know issue with "splunk" extension:'
+                    # and ignore this specific case, and assert otherwise.
+                    if item_name == "splunk/splunk" and "splunk" in self._extensions and self._version == "1.0.0-rc.2":
+                        logger.debug('_finish_item_attributes - ignoring know issue with extension "splunk":'
                                      ' attribute "%s" in %s "%s" is not a defined dictionary attribute',
                                      attribute_name, kind, item_name)
                     else:

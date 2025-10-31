@@ -6,7 +6,7 @@ Here are example of how these can be created from the command-line. Run these fr
 (cd src && python3 -m ocsf_schema_compiler ../tests/uncompiled-schemas/ocsf-schema-v1.6.0 | jq -S > ../tests/compiled-baselines/schema-v1.6.0.json)
 
 # Using jq with the browser mode variation leads to a file that exceeds GitHub 100MB limit.
-(cd src && python3 -m ocsf_schema_compiler ../tests/uncompiled-schemas/ocsf-schema-v1.6.0 -b > ../tests/compiled-baselines/browser-tight-schema-v1.6.0.json)
+(cd src && python3 -m ocsf_schema_compiler ../tests/uncompiled-schemas/ocsf-schema-v1.6.0 -b > ../tests/compiled-baselines/browser-schema-v1.6.0.json)
 
 (cd src && python3 -m ocsf_schema_compiler ../tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e ../tests/uncompiled-schemas/aws-v1.0.0 | jq -S > ../tests/compiled-baselines/browser-schema-v1.6.0-aws-v1.0.0.json)
 

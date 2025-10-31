@@ -5,9 +5,6 @@ from typing import Callable
 
 from ocsf_schema_compiler.jsonish import JObject, JValue
 
-type DiffValue = Missing | DiffDictKeys | JValue
-type DiffCallback = Callable[[str, list[str], JObject, JObject, DiffValue, DiffValue], bool]
-
 
 class Missing:
     pass
@@ -19,6 +16,9 @@ MISSING = Missing()
 @dataclass
 class DiffDictKeys:
     keys: list[str]
+
+
+type DiffValue = Missing | DiffDictKeys | JValue
 
 
 @dataclass
@@ -49,6 +49,9 @@ def formatted_diffs(diffs: list[Difference]) -> str:
         else:
             unexpected_diffs.append(diff.formatted_string())
     return "\n".join(unexpected_diffs + expected_diffs)
+
+
+type DiffCallback = Callable[[str, list[str], JObject, JObject, DiffValue, DiffValue], bool]
 
 
 def diff_objects(obj1: JObject, obj2: JObject, diff_callback: DiffCallback = None) -> tuple[bool, list[Difference]]:

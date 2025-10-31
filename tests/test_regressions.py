@@ -51,8 +51,8 @@ class TestRegressions(unittest.TestCase):
                                   ignore_platform_extensions=True,
                                   extensions_paths=[Path(BASE_DIR, 'uncompiled-schemas/splunk-v1.16.2')])
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, 'compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json'))
+        baseline_schema = read_json_object_file(Path(BASE_DIR,
+                                                     'compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json'))
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(ok, f"schema should match baseline:\n{formatted_diffs(diffs)}")
         # To make sure diff_objects is implemented correctly, also check with Python equality
