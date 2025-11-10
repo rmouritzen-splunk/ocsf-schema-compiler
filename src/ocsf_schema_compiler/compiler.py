@@ -481,11 +481,11 @@ class SchemaCompiler:
                                           f' extension and is not a platform extension')
             else:
                 if profile_name in extension.profiles:
-                    # This profile is defined, but should be scoped
+                    # This is normal - an extension's use of its own profiles are not scoped.
+                    # We will add the scope for the compiled schema.
                     scoped_profile_name = f'{extension.name}/{profile_name}'
-                    self._warning('%s references unscoped profile "%s"; changing to "%s".'
-                                  ' References to profiles from extensions should be extension scoped.',
-                                  context, profile_name, scoped_profile_name)
+                    logger.debug('%s references this extension\'s own profile "%s"; changing to "%s".',
+                                 context, profile_name, scoped_profile_name)
                     return scoped_profile_name
 
                 elif profile_name in self._base_profiles:
