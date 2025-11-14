@@ -1,10 +1,14 @@
-# TODO: Add linting and code formatting.
-
 .PHONY: tests
 tests:
 	cd src && python3 -m unittest discover -v -s ../tests
 
+lint:
+	black --check .
+	ruff check
+
 clean:
+	rm -rf dist
+	rm -rf .ruff_cache
 	find src tests \
 		-type d -name __pycache__ -delete \
 		-or -type f -name '*.py[cod]' -delete \

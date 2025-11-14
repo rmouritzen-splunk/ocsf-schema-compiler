@@ -7,13 +7,18 @@ def to_extension_scoped_name(name: str, item: JObject) -> str:
     return name
 
 
-def add_extension_scope_to_attribute_object_type(attribute: JObject, objects: JObject) -> None:
+def add_extension_scope_to_attribute_object_type(
+    attribute: JObject,
+    objects: JObject,
+) -> None:
     if "object_type" in attribute:
         obj_name = attribute["object_type"]
         if obj_name in objects:
             obj = objects[obj_name]
             if "extension" in obj:
-                attribute["object_type"] = f'{obj["extension"]}/{attribute["object_type"]}'
+                attribute["object_type"] = (
+                    f'{obj["extension"]}/{attribute["object_type"]}'
+                )
 
 
 def add_extension_scope_to_items(items: JObject, objects: JObject) -> JObject:
@@ -30,5 +35,7 @@ def add_extension_scope_to_dictionary(dictionary: dict, objects: JObject) -> Non
     scoped_attributes = {}
     for attribute_name, attribute in dictionary["attributes"].items():
         add_extension_scope_to_attribute_object_type(attribute, objects)
-        scoped_attributes[to_extension_scoped_name(attribute_name, attribute)] = attribute
+        scoped_attributes[to_extension_scoped_name(attribute_name, attribute)] = (
+            attribute
+        )
     dictionary["attributes"] = scoped_attributes

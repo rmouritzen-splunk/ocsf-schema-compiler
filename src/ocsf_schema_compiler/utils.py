@@ -38,20 +38,25 @@ def is_hidden_object(obj_name: str) -> bool:
 
 def extension_scoped_category_uid(extension_uid: int, category_uid: int) -> int:
     """Return an extension-specific category UID."""
-    assert category_uid < 100, \
-        f"category_uid {category_uid} should be less than 100 (not yet extension UID scoped)"
+    assert (
+        category_uid < 100
+    ), f"category_uid {category_uid} should be less than 100 (not yet extension UID scoped)"
     return extension_uid * 100 + category_uid
 
 
 def category_scoped_class_uid(category_uid: int, cls_uid: int) -> int:
     """Return a category-specific class UID."""
-    assert cls_uid < 1000, f"class UID {cls_uid} should be less than 1000 (not yet category UID scoped)"
+    assert (
+        cls_uid < 1000
+    ), f"class UID {cls_uid} should be less than 1000 (not yet category UID scoped)"
     return category_uid * 1000 + cls_uid
 
 
 def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
     """Return a class-specific type UID."""
-    assert type_uid < 100, f"type_uid {type_uid} should be less than 1000 (not class UID scoped)"
+    assert (
+        type_uid < 100
+    ), f"type_uid {type_uid} should be less than 1000 (not class UID scoped)"
     return cls_uid * 100 + type_uid
 
 
@@ -86,4 +91,4 @@ def rank_to_requirement(rank: int) -> Optional[str]:
         return "optional"
     if rank == 0:
         return None
-    raise SchemaException(f'Unknown rank: {rank}')
+    raise SchemaException(f"Unknown rank: {rank}")
