@@ -293,8 +293,8 @@ class SchemaCompiler:
         self._include_cache[path] = profile
 
     def _validate_base_profiles(self) -> None:
-        # Before potentially resolving includes of profiles and then later finding issues
-        # we will validate profiles early so help identify the source of problems.
+        # Before potentially resolving includes of profiles and then later finding
+        # issues we will validate profiles early to identify the source of problems.
         dictionary_attributes = self._dictionary.get("attributes", {})
         for profile_name, profile in self._base_profiles.items():
             for attribute_name, attribute in profile.get("attributes", {}).items():
@@ -393,8 +393,8 @@ class SchemaCompiler:
             logger.info("Reading platform extension directory: %s", base_path)
         else:
             logger.info("Reading extension directory: %s", base_path)
-        # This should only be called after we know that extension.json exists in base_path,
-        # so there's no need for extra error handling.
+        # This should only be called after we know that extension.json exists in
+        # base_path, so there's no need for extra error handling.
         extension_info_path = base_path / "extension.json"
         info = read_json_object_file(extension_info_path)
 
@@ -444,7 +444,8 @@ class SchemaCompiler:
             version = info["version"]
         else:
             raise SchemaException(
-                f'Extension extension.json file is missing "version": {extension_info_path}'
+                f'Extension extension.json file is missing "version":'
+                f" {extension_info_path}"
             )
 
         return Extension(
@@ -548,7 +549,7 @@ class SchemaCompiler:
                             raise SchemaException(
                                 f'Attribute "{attribute_name}" in extension'
                                 f' "{extension.name}" profile "{profile_name}" is not a'
-                                f" defined dictionary attribute"
+                                " defined dictionary attribute"
                             )
 
     def _fix_extension_profile_uses(self, extension: Extension) -> None:
@@ -827,7 +828,8 @@ class SchemaCompiler:
     ) -> None:
         include_item = self._get_include_contents(context, include_path)
 
-        # Include file content should always have "attributes", but we will be defensive.
+        # Include file content should always have "attributes", but we will be
+        # defensive.
         if "attributes" not in include_item:
             self._warning(
                 "Include file suspiciously has no attributes: %s", include_path
@@ -853,8 +855,8 @@ class SchemaCompiler:
             for attribute_name, attribute in attributes.items():
                 if "profile" in attribute:
                     raise SchemaException(
-                        f'Profile "{profile_name}" attribute "{attribute_name}" unexpectedly'
-                        f' has a "profile"'
+                        f'Profile "{profile_name}" attribute "{attribute_name}"'
+                        f' unexpectedly has a "profile"'
                     )
                 if self.legacy_mode:
                     attribute["profile"] = profile_name
@@ -1027,9 +1029,10 @@ class SchemaCompiler:
                     # extension precedence, so this is not supported.
                     raise SchemaException(
                         f'Collision: extension "{extension.name}" {kind} attribute'
-                        f' "{ext_attribute_name}" collides with attribute from extension'
-                        f' "{base_attribute["extension"]}"; extensions are not allowed to modify'
-                        f" each other as the results are non-deterministic"
+                        f' "{ext_attribute_name}" collides with attribute from'
+                        f' extension "{base_attribute["extension"]}"; extensions are'
+                        f" not allowed to modify each other as the results are"
+                        f" non-deterministic"
                     )
 
                 # Second check for a type change. This is not supported as it creates a
@@ -1055,8 +1058,9 @@ class SchemaCompiler:
                                 f' existing "{base_attribute["type"]}"'
                             )
                     if (
-                        ext_attribute["type"]
-                        == "object_t"  # we know both types are the same so base is object_t
+                        ext_attribute["type"] == "object_t"
+                        # no need to check if base_attribute["type"] == "object_t"
+                        # since we already know both types are the same
                         and ext_attribute["object_type"]
                         != base_attribute["object_type"]
                     ):
@@ -1281,7 +1285,7 @@ class SchemaCompiler:
                     enum_value = deepcopy(activity_enum_value)
                     enum_value["caption"] = (
                         f"{cls_caption}:"
-                        f" {activity_enum_value.get("caption", "<unknown>")}"
+                        f" {activity_enum_value.get('caption', '<unknown>')}"
                     )
                     type_uid_enum[enum_key] = enum_value
             else:
@@ -1333,7 +1337,7 @@ class SchemaCompiler:
                 category_name_attribute = cls_attributes.setdefault("category_name", {})
                 category_name_attribute["description"] = (
                     f"The event category name, as defined by category_uid value:"
-                    f" <code>{category.get("caption", "")}</code>."
+                    f" <code>{category.get('caption', '')}</code>."
                 )
             else:
                 if category_key == "other":
@@ -1681,7 +1685,7 @@ class SchemaCompiler:
                     # extension precedence, so this is not supported.
                     raise SchemaException(
                         f"Illegal patch attempt: {context} attempted to patch"
-                        f' "{base_name}" from extension "{base['extension']}";'
+                        f' "{base_name}" from extension "{base["extension"]}";'
                         f" extensions are not allowed to patch each other as the"
                         f" results are non-deterministic"
                     )
@@ -2079,7 +2083,7 @@ class SchemaCompiler:
                         f"Collision of observable type_id {observable_type_id} between"
                         f' {kind} "{key}" caption "{detail.get("caption")}"'
                         f' "observable" and "{entry["caption"]}":'
-                        f' {entry["description"]}'
+                        f" {entry['description']}"
                     )
                 else:
                     entry = self._make_observable_enum_entry(
@@ -2140,7 +2144,7 @@ class SchemaCompiler:
             # Group by group and type and merge attribute_keys
             grouped_links = {}
             for link in links:
-                group_key = f"{link["group"]}:{link["type"]}"
+                group_key = f"{link['group']}:{link['type']}"
                 if group_key in grouped_links:
                     group = grouped_links[group_key]
                     group_attribute_keys = group["attribute_keys"]
@@ -2291,9 +2295,10 @@ class SchemaCompiler:
         # so "object_type" should not yet be present. The logic in this method depends
         # on the unprocessed "type", and will not work if "type" has already been
         # changed to "object_t" and "object_type" added for object types.
-        assert (
-            "object_type" not in attribute
-        ), f'Object attribute "{attribute_name}" unexpectedly already has "object_type"'
+        assert "object_type" not in attribute, (
+            f'Object attribute "{attribute_name}" unexpectedly already has'
+            ' "object_type"'
+        )
 
         dictionary_attributes = self._dictionary.setdefault("attributes", {})
         if attribute_name not in dictionary_attributes:
@@ -2322,9 +2327,8 @@ class SchemaCompiler:
         add_datetime = got_datetime_profile and got_datetime_t
 
         for item_name, item in items.items():
-            dt_attribute_additions: JObject = (
-                {}
-            )  # we cannot add attributes while iterating attributes
+            # We cannot add attributes while iterating attributes, so track additions
+            dt_attribute_additions: JObject = {}
             attributes = item.setdefault("attributes", {})
             for attribute_name, attribute in attributes.items():
                 dictionary_attribute = dictionary_attributes.get(attribute_name, {})
@@ -2405,7 +2409,7 @@ class SchemaCompiler:
                     name = f'extension "{item["extension"]}" {kind} "{item_name}"'
                 else:
                     name = f'{kind} "{item_name}"'
-                missing_requirements.append(f'{name} attribute(s): {", ".join(fixed)}')
+                missing_requirements.append(f"{name} attribute(s): {', '.join(fixed)}")
 
     def _finish_attributes(self):
         self._finish_item_attributes(self._classes, "class")
@@ -2450,14 +2454,14 @@ class SchemaCompiler:
                 #       the if / else block can be removed, and here we can use an
                 #       assert to catch logic bugs.
                 # TODO: Start of what this block of code should eventually look like
-                #     assert attribute_name in dictionary_attributes, (
+                # assert attribute_name in dictionary_attributes, (
                 #     f'Attribute "{attribute_name}" is not a defined dictionary'
                 #     " attribute; this should have been caught earlier in the compile"
                 #     " process"
-                #     )
-                #     new_attribute = deepcopy(dictionary_attributes[attribute_name])
-                #     deep_merge(new_attribute, attribute)
-                #     new_attributes[attribute_name] = new_attribute
+                # )
+                # new_attribute = deepcopy(dictionary_attributes[attribute_name])
+                # deep_merge(new_attribute, attribute)
+                # new_attributes[attribute_name] = new_attribute
                 # TODO: End of what this block of code should eventually look like
                 if attribute_name in dictionary_attributes:
                     new_attribute = deepcopy(dictionary_attributes[attribute_name])

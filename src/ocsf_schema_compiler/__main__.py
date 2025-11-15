@@ -71,8 +71,7 @@ def main():
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="INFO",
-        help="set log level; logs are written to standard error;"
-        " default: %(default)s",
+        help="set log level; logs are written to standard error; default: %(default)s",
     )
     parser.add_argument(
         "-v",

@@ -3,7 +3,7 @@ from ocsf_schema_compiler.jsonish import JObject
 
 def to_extension_scoped_name(name: str, item: JObject) -> str:
     if "extension" in item:
-        return f'{item["extension"]}/{name}'
+        return f"{item['extension']}/{name}"
     return name
 
 
@@ -17,7 +17,7 @@ def add_extension_scope_to_attribute_object_type(
             obj = objects[obj_name]
             if "extension" in obj:
                 attribute["object_type"] = (
-                    f'{obj["extension"]}/{attribute["object_type"]}'
+                    f"{obj['extension']}/{attribute['object_type']}"
                 )
 
 

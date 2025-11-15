@@ -64,7 +64,7 @@ This project has regression tests in the `tests` directory built using the `unit
 make tests
 ```
 
-This project use [Black](https://black.readthedocs.io/) for code formatting, and [Ruff](https://docs.astral.sh/ruff/) for linting. These tools require a virtual environment with `black` and `ruff` installed. With the virtual environment activated, these can be run with the `Makefile` target `lint`. The Black formatter is run in `--check` mode when linting.
+This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting. Ruff's formatting is very similar to Black with some minor differences (improvements, in my opinion). This requires a virtual environment with both installed. With the virtual environment activated the linting and formatting can be run with the `Makefile` target `lint`.
 
 This project's `.gitignore` assumes the virtual environment is at `.venv`.
 
@@ -74,19 +74,13 @@ python3 -m venv .venv
 source ./.venv/bin/activate
 
 # Install the tools
-pip install black ruff
+pip install ruff
 
 # Now the lint target will work
 make lint
-
-# This is equivalent to running these commands
-black --check .
-ruff check
 ```
 
-I typically develop with [Jetbrains PyCharm](https://www.jetbrains.com/pycharm/), which has very different ideas about code style. Fortunately PyCharm lets us switch formatting to using Black. I set up PyCharm to use the virtual environment, which should include Black. Then from the PyCharm > Settings > Tools > Black, leave the execution mode as "Package", pick the correct Python interpreter, and check "On code reformat" and "On save". Then simply saving will fix up PyCharm's bad habits.
-
-Or you could take the possibly easier path and use [VSCodium](https://vscodium.com/) or the [spyware version](https://code.visualstudio.com/) of the same with the various Python packages installed.
+Integrating Ruff with your editor is recommended. See [Editor integration | Ruff](https://docs.astral.sh/ruff/editors/).
 
 ## Publishing
 This project follows the publishing approach described by this tutorial: [How to Publish an Open-Source Python Package to PyPI — Real Python](https://realpython.com/pypi-publish-python-package/), including use of the [Build](https://pypa-build.readthedocs.io/) and [Twine](https://twine.readthedocs.io/) tools. The [BumpVer](https://pypi.org/project/bumpver/) tool is also used to increment versions and keep the various mentions of the version in sync.

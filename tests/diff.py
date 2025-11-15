@@ -126,7 +126,7 @@ def _diff_value_to_string(dv: DiffValue) -> str:
         return "missing"
     if isinstance(dv, DiffDictKeys):
         if dv.keys:
-            return f'key(s) not in other object: {", ".join(dv.keys)}'
+            return f"key(s) not in other object: {', '.join(dv.keys)}"
         else:
             return "key(s) not in other object: none"
     return json.dumps(dv, sort_keys=True)

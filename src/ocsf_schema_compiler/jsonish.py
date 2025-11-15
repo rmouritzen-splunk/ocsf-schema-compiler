@@ -7,7 +7,8 @@ from ocsf_schema_compiler.exceptions import SchemaException
 
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
-# As with all Python type hints, these improve code readability and help IDEs identify type mismatches.
+# As with all Python type hints, these improve code readability and help IDEs identify
+# type mismatches.
 
 # JValue is type alias for types compatible with JSON values.
 type JValue = JObject | JArray | str | int | float | bool | None
@@ -18,7 +19,10 @@ type JArray = list[JValue] | tuple[JValue]
 
 
 def json_type_from_value(value: Any) -> str:
-    """Return JSON type for a Python value. See https://json.org. This is intended for error messages."""
+    """
+    Return JSON type for a Python value. See https://json.org.
+    This is intended for error messages.
+    """
     if isinstance(value, dict):
         return "object"
     if isinstance(value, list):
@@ -44,7 +48,8 @@ def read_json_object_file(path: Path) -> JObject:
         if not isinstance(v, dict):
             t = json_type_from_value(v)
             raise TypeError(
-                f"Schema file contains a JSON {t} value, but should contain an object: {path}"
+                f"Schema file contains a JSON {t} value, but should contain an object:"
+                f" {path}"
             )
         return v
 
@@ -53,10 +58,12 @@ def read_structured_items(
     base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
 ) -> JObject:
     """
-    Read schema structured items found in `kind` directory under `base_path`, recursively, and returns dict with
-    unprocessed items, each keyed by their name attribute.
+    Read schema structured items found in `kind` directory under `base_path`,
+    recursively, and returns dict with unprocessed items, each keyed by their name
+    attribute.
     """
-    # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
+    # event classes can be organized in subdirectories, so we must walk to find all the
+    # event class JSON files
     item_path = base_path / kind
     items = {}
     for dir_path, dir_names, file_names in os.walk(item_path, topdown=False):
@@ -66,11 +73,13 @@ def read_structured_items(
                 obj = read_json_object_file(file_path)
                 name = obj.get("name")
 
-                # The way this is tested, "no value" happens when attribute is missing, JSON null (Python None),
-                # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
+                # The way this is tested, "no value" happens when attribute is missing,
+                # JSON null (Python None), or an empty value (an empty string, JSON
+                # array, JSON object, or even a numeric zero).
                 if not name:
                     raise SchemaException(
-                        f'The "name" value in {kind} file must have a value: {file_path}'
+                        f'The "name" value in {kind} file must have a value:'
+                        f" {file_path}"
                     )
 
                 # Ensure name is a string
@@ -84,9 +93,8 @@ def read_structured_items(
                     existing = items[name]
                     raise SchemaException(
                         f'Collision of "name" in {kind} file: "{name}" with caption'
-                        f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                        f' "{existing.get("caption", "")}",'
-                        f" file: {file_path}"
+                        f' "{obj.get("caption", "")}", collides with {kind} with'
+                        f' caption "{existing.get("caption", "")}", file: {file_path}'
                     )
                 else:
                     items[name] = obj
@@ -100,13 +108,15 @@ def read_patchable_structured_items(
     base_path: Path, kind: str, item_callback_fn: Callable[[Path, JObject], None] = None
 ) -> tuple[JObject, JObject]:
     """
-    Read schema "patchable" structured items found in `kind` directory under `base_path`, recursively, and returns
-    dataclass with unprocessed items and patches. Extension classes and objects are patchable structured items. Items
-    are each keyed by their name attribute and patches are keyed by the name of the item to patch.
+    Read schema "patchable" structured items found in `kind` directory under
+    `base_path`, recursively, and returns dataclass with unprocessed items and patches.
+    Extension classes and objects are patchable structured items. Items are each keyed
+    by their name attribute and patches are keyed by the name of the item to patch.
 
     Returns tuple of items dictionary and patches dictionary.
     """
-    # event classes can be organized in subdirectories, so we must walk to find all the event class JSON files
+    # event classes can be organized in subdirectories, so we must walk to find all the
+    # event class JSON files
     item_path = base_path / kind
     items = {}
     patches = {}
@@ -116,17 +126,21 @@ def read_patchable_structured_items(
                 file_path = Path(dir_path, file_name)
                 obj = read_json_object_file(file_path)
                 # An extension "patch" occurs in two cases:
-                #   1. The item has an "extends" key but no "name" key. This is the common case in practice.
-                #   2. The item has both the "name" and "extends" keys, and both have the same value.
+                #   1. The item has an "extends" key but no "name" key. This is the
+                #      common case in practice.
+                #   2. The item has both the "name" and "extends" keys, and both have
+                #      the same value.
                 name = obj.get("name")
                 extends = obj.get("extends")
 
-                # A structured item (a class, object, etc.) must have a name OR an extends value
-                # The way this is tested, "no value" happens when attribute is missing, JSON null (Python None),
-                # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
+                # A structured item (a class, object, etc.) must have a name OR an
+                # extends value. The way this is tested, "no value" happens when
+                # attribute is missing, JSON null (Python None), or an empty value (an
+                # empty string, JSON array, JSON object, or even a numeric zero).
                 if not name and not extends:
                     raise SchemaException(
-                        f'Extension {kind} file does not have a "name" or "extends" value: {file_path}'
+                        f'Extension {kind} file does not have a "name" or "extends"'
+                        f" value: {file_path}"
                     )
 
                 # Ensure values are strings
@@ -137,23 +151,22 @@ def read_patchable_structured_items(
                     )
                 if extends and not isinstance(extends, str):
                     raise SchemaException(
-                        f'The "extends" value in extension {kind} file must be a string,'
-                        f" but got {json_type_from_value(extends)}: {file_path}"
+                        f'The "extends" value in extension {kind} file must be a'
+                        f" string, but got {json_type_from_value(extends)}: {file_path}"
                     )
 
                 if not name or name == extends:
                     # This is a patch definition.
-                    # An extension event class or object is a patch when it only defines "extends"
-                    # or (weirdly) when "name" and "extends" have the same value. This second case is not used
-                    # by any version of schema on https://github.com/ocsf/ocsf-schema or the Splunk extension at
-                    # https://github.com/ocsf/splunk, but has always been possible and we need to support it.
-                    patch_name = extends  # for clarity
+                    # An extension event class or object is a patch when it only defines
+                    # "extends" or when "name" and "extends" have the same value. This
+                    patch_name = extends  # use patch_name for clarity
                     if patch_name in patches:
                         existing = patches[patch_name]
                         raise SchemaException(
-                            f'Collision of patch name ("extends" key) in extension {kind} file:'
-                            f' "{patch_name}" with caption "{obj.get("caption", "")}", collides with'
-                            f' existing {kind} with caption "{existing.get("caption", "")}",'
+                            f'Collision of patch name ("extends" key) in extension'
+                            f' {kind} file: "{patch_name}" with caption'
+                            f' "{obj.get("caption", "")}", collides with existing'
+                            f' {kind} with caption "{existing.get("caption", "")}",'
                             f" file: {file_path}"
                         )
                     else:
@@ -165,9 +178,10 @@ def read_patchable_structured_items(
                     if name in items:
                         existing = items[name]
                         raise SchemaException(
-                            f'Collision of "name" in extension {kind} file: "{name}" with caption'
-                            f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                            f' "{existing.get("caption", "")}", file: {file_path}'
+                            f'Collision of "name" in extension {kind} file: "{name}"'
+                            f' with caption "{obj.get("caption", "")}", collides with'
+                            f' {kind} with caption "{existing.get("caption", "")}",'
+                            f" file: {file_path}"
                         )
                     else:
                         items[name] = obj

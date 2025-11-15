@@ -3,8 +3,8 @@ tests:
 	cd src && python3 -m unittest discover -v -s ../tests
 
 lint:
-	black --check .
 	ruff check
+	ruff format --check --diff
 
 clean:
 	rm -rf dist

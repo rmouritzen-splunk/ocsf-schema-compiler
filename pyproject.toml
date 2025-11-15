@@ -34,7 +34,7 @@ Issues = "https://github.com/ocsf/ocsf-schema-compiler/issues"
 ocsf-schema-compiler = "ocsf_schema_compiler.__main__:main"
 
 [project.optional-dependencies]
-dev = ["black", "bumpver", "ruff"]
+dev = ["bumpver", "ruff"]
 
 [tool.bumpver]
 current_version = "0.8.1"
@@ -51,3 +51,14 @@ push = false
 [tool.bumpver.file_patterns]
 "pyproject.toml" = ['current_version = "{version}"', 'version = "{version}"']
 "src/ocsf_schema_compiler/__init__.py" = ["{version}"]
+
+[tool.ruff.lint]
+# E501 includes long strings in line-length checks.
+#      https://docs.astral.sh/ruff/rules/line-too-long/
+# W505 includes long comments in line-length checks when enabled by setting below
+#      https://docs.astral.sh/ruff/rules/doc-line-too-long/     
+extend-select = ["E501", "W505"]
+
+[tool.ruff.lint.pycodestyle]
+# max-doc-length = 88
+ignore-overlong-task-comments = false
