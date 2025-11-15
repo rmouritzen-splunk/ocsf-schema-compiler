@@ -49,7 +49,7 @@ output = compiler.compile()
 See `ocsf_schema_compiler.__main__` for a working example.
 
 ## Developing `ocsf-schema-compiler`
-The recommended way to work on OCSF projects is via a fork into your own GitHub profile or organization. Create your fork of [this repo](https://github.com/ocsf-schema-compiler) with the [GitHub CLI](https://cli.github.com/) tool (or, more painfully, manually).
+The recommended way to work on OCSF projects is via a fork into your own GitHub profile or organization. Create your fork of [this repo](https://github.com/ocsf/ocsf-schema-compiler) with the [GitHub CLI](https://cli.github.com/) tool (or, more painfully, manually).
 
 This project requires Python 3.14 or later, and otherwise has no runtime dependencies. This mean you can run it directly from a cloned repo's `src` directory without creating a virtual environment. 
 
