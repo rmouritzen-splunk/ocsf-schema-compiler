@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ocsf-schema-compiler"
-version = "0.8.0"
+version = "0.8.1"
 description = "Compile an Open Cybersecurity Schema Format (OCSF) schema"
 readme = "README.md"
 authors = [{ name = "Rick Mouritzen", email = "rick@rickmode.com" }]
@@ -37,7 +37,7 @@ ocsf-schema-compiler = "ocsf_schema_compiler.__main__:main"
 dev = ["black", "bumpver", "ruff"]
 
 [tool.bumpver]
-current_version = "0.8.0"
+current_version = "0.8.1"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "Bump version {old_version} -> {new_version}"
 tag_message = "{new_version}"
