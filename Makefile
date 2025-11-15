@@ -8,6 +8,7 @@ lint:
 
 clean:
 	rm -rf dist
+	rm -rf src/ocsf_schema_compiler.egg-info
 	rm -rf .ruff_cache
 	find src tests \
 		-type d -name __pycache__ -delete \
