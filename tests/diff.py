@@ -34,9 +34,11 @@ class Difference:
             kind = "expected"
         else:
             kind = "unexpected"
-        return (f'Diff at "{_path_to_string(self.path)}" ({kind}):'
-                f'\n    left value  : {_diff_value_to_string(self.value1)}'
-                f'\n    right value : {_diff_value_to_string(self.value2)}')
+        return (
+            f'Diff at "{_path_to_string(self.path)}" ({kind}):'
+            f"\n    left value  : {_diff_value_to_string(self.value1)}"
+            f"\n    right value : {_diff_value_to_string(self.value2)}"
+        )
 
 
 def formatted_diffs(diffs: list[Difference]) -> str:
@@ -51,10 +53,14 @@ def formatted_diffs(diffs: list[Difference]) -> str:
     return "\n".join(unexpected_diffs + expected_diffs)
 
 
-type DiffCallback = Callable[[str, list[str], JObject, JObject, DiffValue, DiffValue], bool]
+type DiffCallback = Callable[
+    [str, list[str], JObject, JObject, DiffValue, DiffValue], bool
+]
 
 
-def diff_objects(obj1: JObject, obj2: JObject, diff_callback: DiffCallback = None) -> tuple[bool, list[Difference]]:
+def diff_objects(
+    obj1: JObject, obj2: JObject, diff_callback: DiffCallback = None
+) -> tuple[bool, list[Difference]]:
     diffs = []
     _diff_objects(obj1, obj2, diff_callback, [], diffs)
     ok = True
@@ -66,7 +72,11 @@ def diff_objects(obj1: JObject, obj2: JObject, diff_callback: DiffCallback = Non
 
 
 def _diff_objects(
-    obj1: JObject, obj2: JObject, diff_callback: DiffCallback, base_path: list[str], diffs: list[Difference]
+    obj1: JObject,
+    obj2: JObject,
+    diff_callback: DiffCallback,
+    base_path: list[str],
+    diffs: list[Difference],
 ) -> None:
     for key in sorted(set(obj1.keys()) | set(obj2.keys())):
         path = deepcopy(base_path)
@@ -84,14 +94,20 @@ def _diff_objects(
             _diff_objects(v1, v2, diff_callback, path, diffs)
 
 
-def _is_diff_equal_shallow(v1: DiffValue, v2: DiffValue) -> tuple[bool, DiffValue, DiffValue]:
+def _is_diff_equal_shallow(
+    v1: DiffValue, v2: DiffValue
+) -> tuple[bool, DiffValue, DiffValue]:
     if isinstance(v1, dict) and isinstance(v2, dict):
         v1keys = set(v1.keys())
         v2keys = set(v2.keys())
         if v1keys == v2keys:
             return True, None, None
         else:
-            return False, DiffDictKeys(sorted(v1keys - v2keys)), DiffDictKeys(sorted(v2keys - v1keys))
+            return (
+                False,
+                DiffDictKeys(sorted(v1keys - v2keys)),
+                DiffDictKeys(sorted(v2keys - v1keys)),
+            )
     return v1 == v2, v1, v2
 
 
@@ -112,5 +128,5 @@ def _diff_value_to_string(dv: DiffValue) -> str:
         if dv.keys:
             return f'key(s) not in other object: {", ".join(dv.keys)}'
         else:
-            return 'key(s) not in other object: none'
+            return "key(s) not in other object: none"
     return json.dumps(dv, sort_keys=True)

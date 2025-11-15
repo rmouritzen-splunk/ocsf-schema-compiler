@@ -14,7 +14,6 @@ type JValue = JObject | JArray | str | int | float | bool | None
 # JObject is a type alias for dictionary compatible with a JSON object.
 type JObject = dict[str, JValue]
 # JArray is a type alias for types compatible with a JSON array.
-# Note: a custom encoder is required to encode Python sets.
 type JArray = list[JValue] | tuple[JValue]
 
 
@@ -44,7 +43,9 @@ def read_json_object_file(path: Path) -> JObject:
         v = json.load(f)
         if not isinstance(v, dict):
             t = json_type_from_value(v)
-            raise TypeError(f"Schema file contains a JSON {t} value, but should contain an object: {path}")
+            raise TypeError(
+                f"Schema file contains a JSON {t} value, but should contain an object: {path}"
+            )
         return v
 
 
@@ -68,19 +69,25 @@ def read_structured_items(
                 # The way this is tested, "no value" happens when attribute is missing, JSON null (Python None),
                 # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
                 if not name:
-                    raise SchemaException(f'The "name" value in {kind} file must have a value: {file_path}')
+                    raise SchemaException(
+                        f'The "name" value in {kind} file must have a value: {file_path}'
+                    )
 
                 # Ensure name is a string
                 if not isinstance(name, str):
-                    raise SchemaException(f'The "name" value in {kind} file must be a string,'
-                                          f' but got {json_type_from_value(name)}: {file_path}')
+                    raise SchemaException(
+                        f'The "name" value in {kind} file must be a string,'
+                        f" but got {json_type_from_value(name)}: {file_path}"
+                    )
 
                 if name in items:
                     existing = items[name]
-                    raise SchemaException(f'Collision of "name" in {kind} file: "{name}" with caption'
-                                          f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                                          f' "{existing.get("caption", "")}",'
-                                          f' file: {file_path}')
+                    raise SchemaException(
+                        f'Collision of "name" in {kind} file: "{name}" with caption'
+                        f' "{obj.get("caption", "")}", collides with {kind} with caption'
+                        f' "{existing.get("caption", "")}",'
+                        f" file: {file_path}"
+                    )
                 else:
                     items[name] = obj
                     if item_callback_fn:
@@ -119,15 +126,20 @@ def read_patchable_structured_items(
                 # or an empty value (an empty string, JSON array, JSON object, or even a numeric zero).
                 if not name and not extends:
                     raise SchemaException(
-                        f'Extension {kind} file does not have a "name" or "extends" value: {file_path}')
+                        f'Extension {kind} file does not have a "name" or "extends" value: {file_path}'
+                    )
 
                 # Ensure values are strings
                 if name and not isinstance(name, str):
-                    raise SchemaException(f'The "name" value in extension {kind} file must be a string,'
-                                          f' but got {json_type_from_value(name)}: {file_path}')
+                    raise SchemaException(
+                        f'The "name" value in extension {kind} file must be a string,'
+                        f" but got {json_type_from_value(name)}: {file_path}"
+                    )
                 if extends and not isinstance(extends, str):
-                    raise SchemaException(f'The "extends" value in extension {kind} file must be a string,'
-                                          f' but got {json_type_from_value(extends)}: {file_path}')
+                    raise SchemaException(
+                        f'The "extends" value in extension {kind} file must be a string,'
+                        f" but got {json_type_from_value(extends)}: {file_path}"
+                    )
 
                 if not name or name == extends:
                     # This is a patch definition.
@@ -138,10 +150,12 @@ def read_patchable_structured_items(
                     patch_name = extends  # for clarity
                     if patch_name in patches:
                         existing = patches[patch_name]
-                        raise SchemaException(f'Collision of patch name ("extends" key) in extension {kind} file:'
-                                              f' "{patch_name}" with caption "{obj.get("caption", "")}", collides with'
-                                              f' existing {kind} with caption "{existing.get("caption", "")}",'
-                                              f' file: {file_path}')
+                        raise SchemaException(
+                            f'Collision of patch name ("extends" key) in extension {kind} file:'
+                            f' "{patch_name}" with caption "{obj.get("caption", "")}", collides with'
+                            f' existing {kind} with caption "{existing.get("caption", "")}",'
+                            f" file: {file_path}"
+                        )
                     else:
                         patches[patch_name] = obj
                         if item_callback_fn:
@@ -150,9 +164,11 @@ def read_patchable_structured_items(
                     # This is a normal definition.
                     if name in items:
                         existing = items[name]
-                        raise SchemaException(f'Collision of "name" in extension {kind} file: "{name}" with caption'
-                                              f' "{obj.get("caption", "")}", collides with {kind} with caption'
-                                              f' "{existing.get("caption", "")}", file: {file_path}')
+                        raise SchemaException(
+                            f'Collision of "name" in extension {kind} file: "{name}" with caption'
+                            f' "{obj.get("caption", "")}", collides with {kind} with caption'
+                            f' "{existing.get("caption", "")}", file: {file_path}'
+                        )
                     else:
                         items[name] = obj
                         if item_callback_fn:

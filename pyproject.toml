@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocsf-schema-compiler"
+version = "0.8.1"
+description = "Compile an Open Cybersecurity Schema Format (OCSF) schema"
+readme = "README.md"
+authors = [{ name = "Rick Mouritzen", email = "rick@rickmode.com" }]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["compiler", "ocsf", "ocsf-schema", "schema"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">= 3.14"
+
+[project.urls]
+Homepage = "https://github.com/ocsf/ocsf-schema-compiler"
+Repository = "https://github.com/ocsf/ocsf-schema-compiler.git"
+Issues = "https://github.com/ocsf/ocsf-schema-compiler/issues"
+
+[project.scripts]
+ocsf-schema-compiler = "ocsf_schema_compiler.__main__:main"
+
+[project.optional-dependencies]
+dev = ["black", "bumpver", "ruff"]
+
+[tool.bumpver]
+current_version = "0.8.1"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit_message = "Bump version {old_version} -> {new_version}"
+tag_message = "{new_version}"
+tag_scope = "default"
+pre_commit_hook = ""
+post_commit_hook = ""
+commit = true
+tag = true
+push = false
+
+[tool.bumpver.file_patterns]
+"pyproject.toml" = ['current_version = "{version}"', 'version = "{version}"']
+"src/ocsf_schema_compiler/__init__.py" = ["{version}"]
