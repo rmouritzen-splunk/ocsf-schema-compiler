@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ocsf-schema-compiler"
 version = "0.9.0"
-description = "Compile an Open Cybersecurity Schema Format (OCSF) schema"
+description = "Compile an Open Cybersecurity Schema Framework (OCSF) schema"
 readme = "README.md"
 authors = [{ name = "Rick Mouritzen", email = "rick@rickmode.com" }]
 license = "Apache-2.0"
