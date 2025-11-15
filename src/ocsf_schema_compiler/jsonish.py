@@ -14,7 +14,6 @@ type JValue = JObject | JArray | str | int | float | bool | None
 # JObject is a type alias for dictionary compatible with a JSON object.
 type JObject = dict[str, JValue]
 # JArray is a type alias for types compatible with a JSON array.
-# Note: a custom encoder is required to encode Python sets.
 type JArray = list[JValue] | tuple[JValue]
 
 

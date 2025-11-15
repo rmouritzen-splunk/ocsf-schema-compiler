@@ -5,7 +5,7 @@ from pathlib import Path
 from sys import stderr
 from time import perf_counter
 
-import ocsf_schema_compiler
+from ocsf_schema_compiler import __version__
 from ocsf_schema_compiler.compiler import SchemaCompiler
 
 logger = logging.getLogger(__name__)
@@ -14,10 +14,9 @@ logger = logging.getLogger(__name__)
 def main():
     parser = ArgumentParser(
         description=f"Open Cybersecurity Schema Framework Schema Compiler, version "
-        f"{ocsf_schema_compiler.__version__}. Compile an OCSF schema directory"
-        " structure down to a single JSON object written to standard output. Logs are"
-        " written to standard error. Source code at"
-        " https://github.com/ocsf/ocsf-schema-compiler.",
+        f"{__version__}. Compile an OCSF schema directory structure down to a single"
+        " JSON object written to standard output. Logs are written to standard error."
+        " Source code at https://github.com/ocsf/ocsf-schema-compiler.",
     )
     parser.add_argument(
         "path",
@@ -79,7 +78,7 @@ def main():
         "-v",
         "--version",
         action="version",
-        version="%(prog)s " + ocsf_schema_compiler.__version__,
+        version="%(prog)s " + __version__,
     )
 
     args = parser.parse_args()
