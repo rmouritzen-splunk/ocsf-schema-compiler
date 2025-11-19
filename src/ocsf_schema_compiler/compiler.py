@@ -1017,9 +1017,8 @@ class SchemaCompiler:
         "splunk" extension fixes these specific issues.
         """
         base_attributes = base_item.setdefault("attributes", {})
-        for ext_attribute_name, ext_attribute in extension_item.get(
-            "attributes", {}
-        ).items():
+        ext_attributes = extension_item.get("attributes", {})
+        for ext_attribute_name, ext_attribute in ext_attributes.items():
             base_attribute = base_attributes.get(ext_attribute_name)
             if base_attribute:
                 # First, check if this is an attempt to overwrite another extension.
@@ -1696,9 +1695,6 @@ class SchemaCompiler:
                         base_name,
                     )
 
-                # TODO: Add extension and extension_id, similar to attribute overwrites?
-                #       And perhaps also add an annotation saying this is patched?
-
                 self._merge_profiles(base, patch)
                 self._merge_attributes(
                     base.setdefault("attributes", {}),
@@ -1716,6 +1712,11 @@ class SchemaCompiler:
                 # Only occurs in classes, but is safe to do for objects too.
                 put_non_none(base, "associations", patch.get("associations"))
                 self._patch_constraints(base, patch)
+
+                if self.browser_mode:
+                    patched_by = base.setdefault("_patched_by_extensions", [])
+                    patched_by.append(patch["extension"])
+                    patched_by.sort()
 
     def _merge_attributes(
         self, dest_attributes: JObject, source_attributes: JObject, context: str

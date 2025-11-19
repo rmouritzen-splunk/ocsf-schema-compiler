@@ -1,5 +1,7 @@
+import json
 import logging
 import unittest
+from compression import zstd
 from pathlib import Path
 from sys import stderr
 
@@ -39,9 +41,11 @@ class TestRegressions(unittest.TestCase):
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"), browser_mode=True
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/browser-schema-v1.6.0.json")
-        )
+
+        p = Path(BASE_DIR, "compiled-baselines/browser-schema-v1.6.0.zst")
+        with zstd.open(p) as f:
+            baseline_schema = json.load(f)
+
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(ok, f"schema should match baseline:\n{formatted_diffs(diffs)}")
         # To make sure diff_objects is implemented correctly, also check with Python
