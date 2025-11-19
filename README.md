@@ -51,7 +51,7 @@ See `ocsf_schema_compiler.__main__` for a working example.
 ## Developing `ocsf-schema-compiler`
 The recommended way to work on OCSF projects is via a fork into your own GitHub profile or organization. Create your fork of [this repo](https://github.com/ocsf/ocsf-schema-compiler) with the [GitHub CLI](https://cli.github.com/) tool (or, more painfully, manually).
 
-This project requires Python 3.14 or later, and otherwise has no runtime dependencies. This mean you can run it directly from a cloned repo's `src` directory without creating a virtual environment. 
+This project requires Python 3.14 or later, and otherwise has no runtime dependencies. This mean you can run it directly from a cloned repo's `src` directory without creating a virtual environment.
 
 I usually run with a subshell so my current directory remains in the base of the cloned repo. I also often use the [jq](https://jqlang.org/) tool to format the JSON output. For example:
 ```shell
@@ -79,6 +79,16 @@ pip install ruff
 # Now the lint target will work
 make lint
 ```
+
+Also with a virtual environment, a local install can be used to run the compiler.
+```shell
+# A standard Python virtual environment works fine
+python3 -m venv .venv
+source ./.venv/bin/activate
+
+pip install -e .
+```
+
 
 Integrating Ruff with your editor is recommended. See [Editor integration | Ruff](https://docs.astral.sh/ruff/editors/).
 
