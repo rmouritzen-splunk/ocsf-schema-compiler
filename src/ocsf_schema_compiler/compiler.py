@@ -2430,7 +2430,7 @@ class SchemaCompiler:
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         if attribute_name not in dictionary_attributes:
             raise SchemaException(
-                f'attribute "{attribute_name}" is not a defined dictionary attributes'
+                f'attribute "{attribute_name}" is not a defined dictionary attribute'
             )
         dictionary_attribute = j_object(dictionary_attributes[attribute_name])
         # will return None if "object_type" is not present
