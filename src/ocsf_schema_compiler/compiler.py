@@ -1265,7 +1265,7 @@ class SchemaCompiler:
             self._add_source_to_item_attributes(self._classes)
             self._add_source_to_patch_item_attributes(self._class_patches)
         self._resolve_patches(self._classes, self._class_patches, "class")
-        self._resolve_extends(self._classes, "class")
+        self._resolve_extends(self._classes, "Class")
 
         if self.browser_mode:
             # Save informational complete class hierarchy (for schema browser)
@@ -1415,7 +1415,7 @@ class SchemaCompiler:
             self._add_source_to_item_attributes(self._objects)
             self._add_source_to_patch_item_attributes(self._object_patches)
         self._resolve_patches(self._objects, self._object_patches, "object")
-        self._resolve_extends(self._objects, "object")
+        self._resolve_extends(self._objects, "Object")
 
         if self.browser_mode:
             # Save informational complete object hierarchy (for schema browser)
@@ -1732,7 +1732,7 @@ class SchemaCompiler:
                 )
 
                 context = (
-                    f'extension "{patch["extension"]}" {kind} patch "{patch_name}"'
+                    f'Extension "{patch["extension"]}" {kind} patch "{patch_name}"'
                 )
                 if base_name not in items:
                     raise SchemaException(
@@ -2399,7 +2399,7 @@ class SchemaCompiler:
             return  # obj_name already processed
 
         if obj_name not in self._objects:
-            raise SchemaException(f'object "{obj_name}" is not defined')
+            raise SchemaException(f'Object "{obj_name}" is not defined')
         obj = j_object(self._objects[obj_name])
 
         # We specifically want actual and None values since profiles_dict is doing both
@@ -2407,8 +2407,14 @@ class SchemaCompiler:
         profiles_dict[obj_name] = j_array_optional(obj.get("profiles"))
 
         obj_attributes = j_object(obj.setdefault("attributes", {}))
-        for attribute_name, attribute in obj_attributes.items():
-            object_type = self._find_object_type(attribute_name, j_object(attribute))
+        for attr_name, attr in obj_attributes.items():
+            try:
+                object_type = self._find_object_type(attr_name, j_object(attr))
+            except SchemaException as e:
+                raise SchemaException(
+                    f'Error finding type of attribute "{attr_name}"'
+                    f' in object "{obj_name}": {e}'
+                ) from e
             if object_type:
                 self._gather_profiles(object_type, profiles_dict)
 
@@ -2418,7 +2424,7 @@ class SchemaCompiler:
         (an attribute not yet merged with dictionary attribute information).
         Returns None is if attribute is not an object type (it's a dictionary type).
         """
-        # We haven't merged dictionary attributes on to class and object attributes yet,
+        # We haven't merged dictionary attributes in class and object attributes yet,
         # so "object_type" should not yet be present. The logic in this method depends
         # on the unprocessed "type", and will not work if "type" has already been
         # changed to "object_t" and "object_type" added for object types.
@@ -2430,7 +2436,7 @@ class SchemaCompiler:
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         if attribute_name not in dictionary_attributes:
             raise SchemaException(
-                f'attribute "{attribute_name}" is not a defined dictionary attribute'
+                f'Attribute "{attribute_name}" is not a defined dictionary attribute'
             )
         dictionary_attribute = j_object(dictionary_attributes[attribute_name])
         # will return None if "object_type" is not present
