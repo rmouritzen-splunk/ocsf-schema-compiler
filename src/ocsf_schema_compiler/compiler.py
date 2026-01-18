@@ -2,7 +2,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, override
 
 from ocsf_schema_compiler.exceptions import SchemaException
 from ocsf_schema_compiler.jsonish import (
@@ -62,6 +62,35 @@ class Extension:
     object_patches: JObject
     dictionary: JObject
     profiles: JObject
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Extension):
+            return (
+                self.is_platform_extension == other.is_platform_extension
+                and self.uid == other.uid
+            )
+        return False
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Extension):
+            return False
+        if self.is_platform_extension and other.is_platform_extension:
+            return self.uid < other.uid
+        if self.is_platform_extension and not other.is_platform_extension:
+            return True
+        if not self.is_platform_extension and other.is_platform_extension:
+            return False
+        return self.uid < other.uid
+
+
+def _extension_j_value_key(v: JValue):
+    """
+    Helper key function to sort values of SchemaCompiler._extensions consistent
+    with Extension dataclass
+    """
+    o = j_object(v)
+    return (not o["platform_extension?"], o["uid"])
 
 
 @dataclass
@@ -235,9 +264,11 @@ class SchemaCompiler:
 
         logger.info("Compiled schema base version: %s", self._version)
         if self._extensions:
+            extensions = list(self._extensions.values())
+            extensions.sort(key=_extension_j_value_key)
             logger.info(
                 "Compiled schema includes the following extension(s):\n%s",
-                pretty_json_encode(self._extensions),
+                pretty_json_encode(extensions),
             )
 
         return output
@@ -379,6 +410,11 @@ class SchemaCompiler:
                 self._read_extensions_in_path(
                     extensions, extensions_path, is_platform_extension=False
                 )
+
+        # Ensure deterministic application of extensions.
+        # This relies on sorting platform extensions before others
+        # and then sorting by extension UID.
+        extensions.sort()
 
         self._enrich_extension_items(extensions)
         return extensions
@@ -1740,23 +1776,27 @@ class SchemaCompiler:
                     )
 
                 base = j_object(items[base_name])
+                base_from = "base schema"
 
                 if "extension" in base:
-                    # This is not allowed as the result is non-deterministic, depending
-                    # on the order the extensions are processed. We have no notion of
-                    # extension precedence, so this is not supported.
-                    raise SchemaException(
-                        f"Illegal patch attempt: {context} attempted to patch"
-                        f' "{base_name}" from extension "{base["extension"]}";'
-                        f" extensions are not allowed to patch each other as the"
-                        f" results are non-deterministic"
-                    )
-                else:
-                    logger.info(
-                        'Patch: %s is patching "%s" from base schema',
-                        context,
-                        base_name,
-                    )
+                    ext_name = j_string(base["extension"])
+                    ext = j_object(self._extensions[ext_name])
+                    if not ext["platform_extension?"]:
+                        # Patching of platform extensions is allowed, as this is
+                        # effectively the same as patching the core schema.
+                        # Patching of non-platform extensions, however, is not allowed
+                        # to accidental modifications (or intentional abuse).
+                        raise SchemaException(
+                            f"Illegal patch attempt: {context} attempted to patch"
+                            f' "{base_name}" from extension "{base["extension"]}";'
+                            f" extensions are not allowed to patch other (non-platform)"
+                            f" extensions"
+                        )
+                    base_from = f'extension "{ext_name}"'
+
+                logger.info(
+                    'Patch: %s is patching "%s" from %s', context, base_name, base_from
+                )
 
                 self._merge_profiles(base, patch)
                 self._merge_attributes(

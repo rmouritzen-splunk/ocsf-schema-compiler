@@ -14,9 +14,11 @@ ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 | jq -S > tests
 # Browser schema tests will look for compressed JSON *.zst files instead plain *.json files.
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -b | zstd > tests/compiled-baselines/browser-schema-v1.6.0.zst
 
-ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/aws-v1.0.0 | jq -S > tests/compiled-baselines/browser-schema-v1.6.0-aws-v1.0.0.json
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/aws-v1.0.0 | jq -S > tests/compiled-baselines/schema-v1.6.0-aws-v1.0.0.json
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.0.0-rc.2 -i -e tests/uncompiled-schemas/splunk-v1.16.2 | jq -S > ../tests/compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json
+
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/example-extension | jq -S > tests/compiled-baselines/schema-v1.6.0-example-v1.0.0.json
 ```
 
 The use of `jq -S` is not required but can be helpful when using other diff tools like the one in Visual Studio Code.

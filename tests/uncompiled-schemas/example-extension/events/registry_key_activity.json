@@ -1,0 +1,11 @@
+{
+  "caption": "Patch of Registry Key Activity",
+  "description": "Example patch of Registry Key Activity.",
+  "extends": "registry_key_activity",
+  "attributes": {
+    "comment": {
+      "group": "primary",
+      "requirement": "recommended"
+    }
+  }
+}
