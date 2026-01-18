@@ -2,7 +2,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, override
 
 from ocsf_schema_compiler.exceptions import SchemaException
 from ocsf_schema_compiler.jsonish import (
@@ -62,6 +62,35 @@ class Extension:
     object_patches: JObject
     dictionary: JObject
     profiles: JObject
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Extension):
+            return (
+                self.is_platform_extension == other.is_platform_extension
+                and self.uid == other.uid
+            )
+        return False
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Extension):
+            return False
+        if self.is_platform_extension and other.is_platform_extension:
+            return self.uid < other.uid
+        if self.is_platform_extension and not other.is_platform_extension:
+            return True
+        if not self.is_platform_extension and other.is_platform_extension:
+            return False
+        return self.uid < other.uid
+
+
+def _extension_j_value_key(v: JValue):
+    """
+    Helper key function to sort values of SchemaCompiler._extensions consistent
+    with Extension dataclass
+    """
+    o = j_object(v)
+    return (not o["platform_extension?"], o["uid"])
 
 
 @dataclass
@@ -235,9 +264,11 @@ class SchemaCompiler:
 
         logger.info("Compiled schema base version: %s", self._version)
         if self._extensions:
+            extensions = list(self._extensions.values())
+            extensions.sort(key=_extension_j_value_key)
             logger.info(
                 "Compiled schema includes the following extension(s):\n%s",
-                pretty_json_encode(self._extensions),
+                pretty_json_encode(extensions),
             )
 
         return output
@@ -379,6 +410,11 @@ class SchemaCompiler:
                 self._read_extensions_in_path(
                     extensions, extensions_path, is_platform_extension=False
                 )
+
+        # Ensure deterministic application of extensions.
+        # This relies on sorting platform extensions before others
+        # and then sorting by extension UID.
+        extensions.sort()
 
         self._enrich_extension_items(extensions)
         return extensions
@@ -1265,7 +1301,7 @@ class SchemaCompiler:
             self._add_source_to_item_attributes(self._classes)
             self._add_source_to_patch_item_attributes(self._class_patches)
         self._resolve_patches(self._classes, self._class_patches, "class")
-        self._resolve_extends(self._classes, "class")
+        self._resolve_extends(self._classes, "Class")
 
         if self.browser_mode:
             # Save informational complete class hierarchy (for schema browser)
@@ -1415,7 +1451,7 @@ class SchemaCompiler:
             self._add_source_to_item_attributes(self._objects)
             self._add_source_to_patch_item_attributes(self._object_patches)
         self._resolve_patches(self._objects, self._object_patches, "object")
-        self._resolve_extends(self._objects, "object")
+        self._resolve_extends(self._objects, "Object")
 
         if self.browser_mode:
             # Save informational complete object hierarchy (for schema browser)
@@ -1732,7 +1768,7 @@ class SchemaCompiler:
                 )
 
                 context = (
-                    f'extension "{patch["extension"]}" {kind} patch "{patch_name}"'
+                    f'Extension "{patch["extension"]}" {kind} patch "{patch_name}"'
                 )
                 if base_name not in items:
                     raise SchemaException(
@@ -1740,23 +1776,27 @@ class SchemaCompiler:
                     )
 
                 base = j_object(items[base_name])
+                base_from = "base schema"
 
                 if "extension" in base:
-                    # This is not allowed as the result is non-deterministic, depending
-                    # on the order the extensions are processed. We have no notion of
-                    # extension precedence, so this is not supported.
-                    raise SchemaException(
-                        f"Illegal patch attempt: {context} attempted to patch"
-                        f' "{base_name}" from extension "{base["extension"]}";'
-                        f" extensions are not allowed to patch each other as the"
-                        f" results are non-deterministic"
-                    )
-                else:
-                    logger.info(
-                        'Patch: %s is patching "%s" from base schema',
-                        context,
-                        base_name,
-                    )
+                    ext_name = j_string(base["extension"])
+                    ext = j_object(self._extensions[ext_name])
+                    if not ext["platform_extension?"]:
+                        # Patching of platform extensions is allowed, as this is
+                        # effectively the same as patching the core schema.
+                        # Patching of non-platform extensions, however, is not allowed
+                        # to accidental modifications (or intentional abuse).
+                        raise SchemaException(
+                            f"Illegal patch attempt: {context} attempted to patch"
+                            f' "{base_name}" from extension "{base["extension"]}";'
+                            f" extensions are not allowed to patch other (non-platform)"
+                            f" extensions"
+                        )
+                    base_from = f'extension "{ext_name}"'
+
+                logger.info(
+                    'Patch: %s is patching "%s" from %s', context, base_name, base_from
+                )
 
                 self._merge_profiles(base, patch)
                 self._merge_attributes(
@@ -2399,7 +2439,7 @@ class SchemaCompiler:
             return  # obj_name already processed
 
         if obj_name not in self._objects:
-            raise SchemaException(f'object "{obj_name}" is not defined')
+            raise SchemaException(f'Object "{obj_name}" is not defined')
         obj = j_object(self._objects[obj_name])
 
         # We specifically want actual and None values since profiles_dict is doing both
@@ -2407,8 +2447,14 @@ class SchemaCompiler:
         profiles_dict[obj_name] = j_array_optional(obj.get("profiles"))
 
         obj_attributes = j_object(obj.setdefault("attributes", {}))
-        for attribute_name, attribute in obj_attributes.items():
-            object_type = self._find_object_type(attribute_name, j_object(attribute))
+        for attr_name, attr in obj_attributes.items():
+            try:
+                object_type = self._find_object_type(attr_name, j_object(attr))
+            except SchemaException as e:
+                raise SchemaException(
+                    f'Error finding type of attribute "{attr_name}"'
+                    f' in object "{obj_name}": {e}'
+                ) from e
             if object_type:
                 self._gather_profiles(object_type, profiles_dict)
 
@@ -2418,7 +2464,7 @@ class SchemaCompiler:
         (an attribute not yet merged with dictionary attribute information).
         Returns None is if attribute is not an object type (it's a dictionary type).
         """
-        # We haven't merged dictionary attributes on to class and object attributes yet,
+        # We haven't merged dictionary attributes in class and object attributes yet,
         # so "object_type" should not yet be present. The logic in this method depends
         # on the unprocessed "type", and will not work if "type" has already been
         # changed to "object_t" and "object_type" added for object types.
@@ -2430,7 +2476,7 @@ class SchemaCompiler:
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         if attribute_name not in dictionary_attributes:
             raise SchemaException(
-                f'attribute "{attribute_name}" is not a defined dictionary attributes'
+                f'Attribute "{attribute_name}" is not a defined dictionary attribute'
             )
         dictionary_attribute = j_object(dictionary_attributes[attribute_name])
         # will return None if "object_type" is not present

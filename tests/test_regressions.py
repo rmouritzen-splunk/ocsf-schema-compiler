@@ -104,6 +104,24 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
+    def test_v1_6_0_with_example_extension(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extension")],
+        )
+        schema = compiler.compile()
+        baseline_schema = read_json_object_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-example-v1.0.0.json")
+        )
+        ok, diffs = diff_objects(schema, baseline_schema)
+        self.assertTrue(
+            ok,
+            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
+        )
+        # To make sure diff_objects is implemented correctly, also check with Python
+        # equality
+        self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
     def test_legacy_v1_6_0_with_aws_v1_0_0(self):
         # The legacy schema export, even with v3 fixes, changes a slightly different
         # schema, however these differences are not material differences in actual

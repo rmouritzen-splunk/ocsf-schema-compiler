@@ -1,0 +1,7 @@
+{
+  "uid": 100,
+  "caption": "Example Extension",
+  "description": "Example extension with patch of platform extension.",
+  "name": "example",
+  "version": "1.0.0"
+}
