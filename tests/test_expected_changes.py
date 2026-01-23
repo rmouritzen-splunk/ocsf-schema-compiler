@@ -13,7 +13,7 @@ from diff import (  # pyright: ignore[reportImplicitRelativeImport]
 )
 from ocsf_schema_compiler.compiler import SchemaCompiler
 from ocsf_schema_compiler.jsonish import JObject
-from ocsf_schema_compiler.structured_read import read_json_object_file
+from ocsf_schema_compiler.structured_read import read_json_object_zstandard_file
 
 BASE_DIR = Path(__file__).parent
 
@@ -41,8 +41,8 @@ class TestExpectedChanges(unittest.TestCase):
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0")
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0.json.zst")
         )
         ok, diffs = diff_objects(schema, baseline_schema, diff_callback=diff_callback)
         self.assertTrue(
