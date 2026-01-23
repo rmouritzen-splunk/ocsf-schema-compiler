@@ -13,10 +13,7 @@ from diff import (  # pyright: ignore[reportImplicitRelativeImport]
 )
 from ocsf_schema_compiler.compiler import SchemaCompiler
 from ocsf_schema_compiler.jsonish import JObject
-from ocsf_schema_compiler.structured_read import (
-    read_json_object_file,
-    read_json_object_zstandard_file,
-)
+from ocsf_schema_compiler.structured_read import read_json_object_zstandard_file
 
 BASE_DIR = Path(__file__).parent
 
@@ -38,8 +35,8 @@ class TestRegressions(unittest.TestCase):
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0")
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0.json.zst")
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -56,7 +53,7 @@ class TestRegressions(unittest.TestCase):
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
-            Path(BASE_DIR, "compiled-baselines/browser-schema-v1.6.0.zst")
+            Path(BASE_DIR, "compiled-baselines/browser-schema-v1.6.0.json.zst")
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -73,8 +70,8 @@ class TestRegressions(unittest.TestCase):
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-aws-v1.0.0.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst")
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -92,8 +89,11 @@ class TestRegressions(unittest.TestCase):
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/splunk-v1.16.2")],
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR,
+                "compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json.zst",
+            )
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -110,8 +110,8 @@ class TestRegressions(unittest.TestCase):
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extension")],
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-example-v1.0.0.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-example-v1.0.0.json.zst")
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -123,7 +123,7 @@ class TestRegressions(unittest.TestCase):
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
     def test_legacy_v1_6_0_with_aws_v1_0_0(self):
-        # The legacy schema export, even with v3 fixes, changes a slightly different
+        # The legacy schema export, even with v3 fixes, creates a slightly different
         # schema, however these differences are not material differences in actual
         # usage. The test uses a diff callback to ensure these differences are ones we
         # expect.
@@ -136,8 +136,11 @@ class TestRegressions(unittest.TestCase):
             scope_extension_keys=True,
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_file(
-            Path(BASE_DIR, "compiled-baselines/server-v3-schema-v1.6.0-aws-v1.0.0.json")
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR,
+                "compiled-baselines/server-v3-schema-v1.6.0-aws-v1.0.0.json.zst",
+            )
         )
         ok, diffs = diff_objects(
             schema, baseline_schema, diff_callback=legacy_aws_diff_callback

@@ -2092,6 +2092,43 @@ class SchemaCompiler:
             dictionary_types.setdefault("attributes", {})
         )
 
+        # Make sure dictionary types are OK
+        for type_name, type_detail in dictionary_types_attributes.items():
+            type_detail = j_object(type_detail)
+            if "caption" not in type_detail:
+                raise SchemaException(
+                    self._dictionary_type_error_message(
+                        type_name, type_detail, 'does not define "caption"'
+                    )
+                )
+            if "type" in type_detail:
+                # This is a derived type
+                base_type = type_detail["type"]
+                if base_type not in dictionary_types_attributes:
+                    raise SchemaException(
+                        self._dictionary_type_error_message(
+                            type_name,
+                            type_detail,
+                            f'uses undefined dictionary type "{base_type}"',
+                        )
+                    )
+                if "type_name" not in type_detail:
+                    if (
+                        self._version == "1.0.0-rc.2"
+                        and type_detail.get("extension") == "splunk"
+                    ):
+                        logger.info(
+                            'Ignoring know issue with extension "splunk":'
+                            ' dictionary type "%s" does not define "type_name"',
+                            type_name,
+                        )
+                    else:
+                        raise SchemaException(
+                            self._dictionary_type_error_message(
+                                type_name, type_detail, 'does not define "type_name"'
+                            )
+                        )
+
         for attribute_name, attribute in dictionary_attributes.items():
             attribute = j_object(attribute)
             if "type" in attribute:
@@ -2132,6 +2169,17 @@ class SchemaCompiler:
                             f'uses undefined "type" "{attribute_type}"',
                         )
                     )
+
+    @staticmethod
+    def _dictionary_type_error_message(
+        type_name: str, type_detail: JObject, problem: str
+    ) -> str:
+        if "extension" in type_detail:
+            return (
+                f'Dictionary type "{type_name}" from extension'
+                f' "{type_detail["extension"]}" {problem}'
+            )
+        return f'Dictionary attribute "{type_name}" {problem}'
 
     @staticmethod
     def _dictionary_error_message(
@@ -2637,62 +2685,110 @@ class SchemaCompiler:
 
     def _finish_item_attributes(self, items: JObject, kind: str) -> None:
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
+        dictionary_types = j_object(self._dictionary.setdefault("types", {}))
+        dictionary_types_attributes = j_object(
+            dictionary_types.setdefault("attributes", {})
+        )
         for item_name, item in items.items():
             item = j_object(item)
             attributes = j_object(item.setdefault("attributes", {}))
             new_attributes: JObject = {}
             for attribute_name, attribute in attributes.items():
-                # TODO: Attribute that is not defined in dictionary attributes should
-                #       never happen at this point, but does today due to the flawed
-                #       splunk/splunk profile in the "splunk" extension. Once fixed,
-                #       the if / else block can be removed, and here we can use an
-                #       assert to catch logic bugs.
-                # TODO: Start of what this block of code should eventually look like
-                # assert attribute_name in dictionary_attributes, (
-                #     f'Attribute "{attribute_name}" is not a defined dictionary'
-                #     " attribute; this should have been caught earlier in the compile"
-                #     " process"
-                # )
-                # new_attribute = deep_copy_j_object(
-                #     j_object(dictionary_attributes[attribute_name])
-                # )
-                # deep_merge(new_attribute, attribute)
-                # new_attributes[attribute_name] = new_attribute
-                # TODO: End of what this block of code should eventually look like
-                attribute = j_object(attribute)
-                if attribute_name in dictionary_attributes:
-                    new_attribute = deep_copy_j_object(
-                        j_object(dictionary_attributes[attribute_name])
-                    )
-                    deep_merge(new_attribute, attribute)
-                    new_attributes[attribute_name] = new_attribute
-                else:
-                    # This is a known issue with the 1.0.0-rc.2 with "splunk" extension
-                    # compilation, so we will log and ignore this specific case, and
-                    # assert otherwise.
-                    if (
-                        item_name == "splunk/splunk"
-                        and "splunk" in self._extensions
-                        and self._version == "1.0.0-rc.2"
-                    ):
-                        logger.debug(
-                            "_finish_item_attributes - ignoring know issue with"
-                            ' extension "splunk": attribute "%s" in %s "%s" is not a'
-                            " defined dictionary attribute",
-                            attribute_name,
-                            kind,
-                            item_name,
-                        )
-                    else:
-                        assert attribute_name in dictionary_attributes, (
-                            f'Attribute "{attribute_name}" in {kind} "{item_name}" is'
-                            f" not a defined dictionary attribute; this should have"
-                            f" been caught earlier in the compile process"
-                        )
-
+                new_attribute = self._finish_item_attribute(
+                    item_name,
+                    kind,
+                    attribute_name,
+                    j_object(attribute),
+                    dictionary_attributes,
+                    dictionary_types_attributes,
+                )
+                new_attributes[attribute_name] = new_attribute
             item["attributes"] = new_attributes
             if self.browser_mode:
                 self._add_sibling_of_to_attributes(new_attributes)
+
+    def _finish_item_attribute(
+        self,
+        item_name: str,
+        kind: str,
+        attribute_name: str,
+        attribute: JObject,
+        dictionary_attributes: JObject,
+        dictionary_types_attributes: JObject,
+    ) -> JObject:
+        # TODO: Attribute that is not defined in dictionary attributes should never
+        #       happen at this point, but does today due to the flawed splunk/splunk
+        #       profile in the "splunk" extension. Once fixed, this check and the
+        #       the logic after the return can be removed and the assert at the end of
+        #       this function can be moved to the top.
+        if attribute_name in dictionary_attributes:
+            dict_attribute = j_object(dictionary_attributes[attribute_name])
+            new_attribute = deep_copy_j_object(dict_attribute)
+            deep_merge(new_attribute, attribute)
+
+            # Check if the item attribute's type has been changed, because if so,
+            # we need make sure the type_name ends up with the correct value.
+            if "type" in attribute:
+                attribute_type = attribute["type"]
+                if attribute_type != dict_attribute["type"]:
+                    # This item attribute's type has been changed.
+                    # We only allow a compatible type in this case - a subtype.
+                    # This could mean a derived dictionary type and parent object type
+                    # of the original. Here we are only supporting a derived dictionary
+                    # type.
+                    if attribute_type not in dictionary_types_attributes:
+                        raise SchemaException(
+                            f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
+                            f' refined type "{attribute_type}", however this type is'
+                            f" not a defined dictionary type (note: refining object"
+                            f" types is not supported, though is possible)"
+                        )
+                    # Make sure subtype of this attribute matches the original
+                    # attribute's type
+                    original_type = dict_attribute["type"]
+                    dict_type = j_object(dictionary_types_attributes[attribute_type])
+                    subtype = dict_type["type"]
+                    if subtype != original_type:
+                        raise SchemaException(
+                            f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
+                            f' refined type "{attribute_type}", however this type is'
+                            f' not a subtype of the original "{original_type}"'
+                        )
+                    # Checks are OK... we just need to fix up "type_name", which
+                    # currently has the type from the dictionary type
+                    new_attribute["type_name"] = dict_type["caption"]
+                    logger.debug(
+                        'Attribute "%s" in %s "%s" is using refined type "%s"',
+                        attribute_name,
+                        kind,
+                        item_name,
+                        attribute_type,
+                    )
+
+            return new_attribute
+
+        # This is a known issue with the 1.0.0-rc.2 with "splunk" extension compilation,
+        # so we will log and ignore this specific case, and assert otherwise.
+        if (
+            item_name == "splunk/splunk"
+            and "splunk" in self._extensions
+            and self._version == "1.0.0-rc.2"
+        ):
+            logger.debug(
+                '_finish_item_attribute - ignoring know issue with extension "splunk":'
+                ' attribute "%s" in %s "%s" is not a defined dictionary attribute',
+                attribute_name,
+                kind,
+                item_name,
+            )
+        else:
+            assert attribute_name in dictionary_attributes, (
+                f'Attribute "{attribute_name}" in {kind} "{item_name}" is not a defined'
+                f" dictionary attribute; this should have been caught earlier in the"
+                f" compile process"
+            )
+
+        return attribute
 
     @staticmethod
     def _add_sibling_of_to_attributes(attributes: JObject) -> None:
