@@ -82,6 +82,24 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
+    def test_v1_0_0_rc_2(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.0.0-rc.2"),
+            ignore_platform_extensions=True,
+        )
+        schema = compiler.compile()
+        baseline_schema = read_json_object_zstandard_file(
+            Path(BASE_DIR, "compiled-baselines/schema-v1.0.0-rc.2.json.zst")
+        )
+        ok, diffs = diff_objects(schema, baseline_schema)
+        self.assertTrue(
+            ok,
+            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
+        )
+        # To make sure diff_objects is implemented correctly, also check with Python
+        # equality
+        self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
     def test_v1_0_0_rc_2_with_splunk_v1_16_2(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.0.0-rc.2"),

@@ -18,6 +18,8 @@ ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -b | zstd > tes
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/aws-v1.0.0 | zstd > tests/compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst
 
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.0.0-rc.2 -i | zstd > tests/compiled-baselines/schema-v1.0.0-rc.2.json.zst
+
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.0.0-rc.2 -i -e tests/uncompiled-schemas/splunk-v1.16.2 | zstd > tests/compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json.zst
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/example-extension | zstd > tests/compiled-baselines/schema-v1.6.0-example-v1.0.0.json.zst

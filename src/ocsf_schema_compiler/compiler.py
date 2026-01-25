@@ -220,6 +220,14 @@ class SchemaCompiler:
             raise FileNotFoundError(f"Schema path does not exist: {self.schema_path}")
 
         self._read_base_schema()
+
+        if self._version == "1.0.0-rc.2" and not self.ignore_platform_extensions:
+            raise SchemaException(
+                'Compiling the 1.0.0-rc.2 schema with its "dev" extension is not'
+                " supported because it has overrides that are now considered errors."
+                " Use the -i, --ignore-platform-extensions option."
+            )
+
         self._read_and_merge_extensions()
 
         self._enrich_dictionary_object_types()
@@ -1221,9 +1229,8 @@ class SchemaCompiler:
                         # dictionary types are subtypes that do not define their base
                         # type. We will allow extensions merge types in these cases.
                         # The "splunk" extension fixes actually does fix these issues.
-                        # NOTE: primitives dictionary types "string_t" and "long_t" do
-                        # _not_ define "type", so we cannot do a general validation
-                        # to ensure all types defines a "type".
+                        # NOTE: only dictionary subtypes define "type", so we cannot
+                        # do a general validation.
                         logger.info(
                             "Allowing fix of known issue in schema version 1.0.0-rc.2"
                             ' by extension "splunk": %s dictionary type "%s" is a'
@@ -1999,7 +2006,7 @@ class SchemaCompiler:
             self._add_common_dictionary_attribute_links()
             self._add_class_dictionary_attribute_links()
             self._add_object_dictionary_attribute_links()
-        self._enrich_and_validate_dictionary_attribute_types()
+        self._enrich_and_validate_dictionary_types()
         self._add_datetime_sibling_dictionary_attributes()
 
     def _add_common_dictionary_attribute_links(self) -> None:
@@ -2085,14 +2092,16 @@ class SchemaCompiler:
                     f' "{item_attribute_name}"'
                 )
 
-    def _enrich_and_validate_dictionary_attribute_types(self) -> None:
-        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
+    def _enrich_and_validate_dictionary_types(self) -> None:
         dictionary_types = j_object(self._dictionary.setdefault("types", {}))
         dictionary_types_attributes = j_object(
             dictionary_types.setdefault("attributes", {})
         )
+        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
 
-        # Make sure dictionary types are OK
+        # Make sure dictionary types are OK. These are specifically checked as these
+        # keys are used later in the compile, and verifying early leads to better
+        # error messages. Plus we can fix a known issue with 1.0.0-rc.2.
         for type_name, type_detail in dictionary_types_attributes.items():
             type_detail = j_object(type_detail)
             if "caption" not in type_detail:
@@ -2101,8 +2110,11 @@ class SchemaCompiler:
                         type_name, type_detail, 'does not define "caption"'
                     )
                 )
+            # Check type and type_name, which are used in dictionary subtype definitions
+            # to specify the base type and base type name.
+            # (These should really be "base_type" and "base_type_caption".)
             if "type" in type_detail:
-                # This is a derived type
+                # This is a subtype
                 base_type = type_detail["type"]
                 if base_type not in dictionary_types_attributes:
                     raise SchemaException(
@@ -2117,17 +2129,48 @@ class SchemaCompiler:
                         self._version == "1.0.0-rc.2"
                         and type_detail.get("extension") == "splunk"
                     ):
-                        logger.info(
+                        self._warning(
                             'Ignoring know issue with extension "splunk":'
-                            ' dictionary type "%s" does not define "type_name"',
+                            ' dictionary type "%s" defines "type" without "type_name";'
+                            " both are required to define a dictionary subtype"
+                            '\n\n    PLEASE FIX by defining "type_name" in dictionary'
+                            ' type "%s"\n',
+                            type_name,
                             type_name,
                         )
                     else:
                         raise SchemaException(
                             self._dictionary_type_error_message(
-                                type_name, type_detail, 'does not define "type_name"'
+                                type_name,
+                                type_detail,
+                                'defines "type" without "type_name"; both are required'
+                                " to define a dictionary subtype",
                             )
                         )
+            if "type_name" in type_detail and "type" not in type_detail:
+                if self._version == "1.0.0-rc.2":
+                    # 1.0.0-rc.2 left out "type" for some subtypes. The legacy compiler
+                    # defaulted to "string_t". However, some of the 1.0.0-rc.2 subtypes
+                    # defined "type_name", so we can fix these, a more complicated
+                    # compensation later in the compile process.
+                    logger.info(
+                        'Fixing known issue with 1.0.0-rc.2: dictionary type "%s"'
+                        ' is a subtype with base "type_name" of "%s", but does not'
+                        ' define "type"; assuming "string_t"',
+                        type_name,
+                        type_detail["type_name"],
+                    )
+                    type_detail["type"] = "string_t"
+                else:
+                    # For later schemas, "type_name" without "type" is an error.
+                    raise SchemaException(
+                        self._dictionary_type_error_message(
+                            type_name,
+                            type_detail,
+                            'defines "type_name" without "type"; both are required to'
+                            " define a dictionary subtype",
+                        )
+                    )
 
         for attribute_name, attribute in dictionary_attributes.items():
             attribute = j_object(attribute)
@@ -2179,7 +2222,7 @@ class SchemaCompiler:
                 f'Dictionary type "{type_name}" from extension'
                 f' "{type_detail["extension"]}" {problem}'
             )
-        return f'Dictionary attribute "{type_name}" {problem}'
+        return f'Dictionary type "{type_name}" {problem}'
 
     @staticmethod
     def _dictionary_error_message(
@@ -2732,16 +2775,18 @@ class SchemaCompiler:
                 attribute_type = attribute["type"]
                 if attribute_type != dict_attribute["type"]:
                     # This item attribute's type has been changed.
-                    # We only allow a compatible type in this case - a subtype.
-                    # This could mean a derived dictionary type and parent object type
-                    # of the original. Here we are only supporting a derived dictionary
-                    # type.
+                    # We only allow a compatible subtype in this case.
+                    # In general, a subtype could be a dictionary subtype or an object
+                    # that inherits from a parent object (a derived object).
+                    # Currently this compiler only supports dictionary subtypes, not
+                    # object subtypes, though object subtypes are possible.
                     if attribute_type not in dictionary_types_attributes:
                         raise SchemaException(
                             f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                            f' refined type "{attribute_type}", however this type is'
-                            f" not a defined dictionary type (note: refining object"
-                            f" types is not supported, though is possible)"
+                            f' refined type "{attribute_type}", however the base type'
+                            f" is not a defined dictionary type. Note: refining object"
+                            f" types is not supported, though possible; file an issue"
+                            f" if this is needed."
                         )
                     # Make sure subtype of this attribute matches the original
                     # attribute's type
@@ -2758,7 +2803,8 @@ class SchemaCompiler:
                     # currently has the type from the dictionary type
                     new_attribute["type_name"] = dict_type["caption"]
                     logger.debug(
-                        'Attribute "%s" in %s "%s" is using refined type "%s"',
+                        '_finish_item_attribute - attribute "%s" in %s "%s" is using'
+                        ' refined type "%s"',
                         attribute_name,
                         kind,
                         item_name,

@@ -4,19 +4,27 @@ all: tests lint build-check
 tests:
 	cd src && python3 -m unittest discover -v -s ../tests
 
+pip-update:
+	@./scripts/ensure-venv.sh
+	# Install or update all development time pip dependencies
+	python -m pip install -U basedpyright ruff flit
+
 lint:
+	@./scripts/ensure-venv.sh
 	# Requires ruff and basedpyright: python -m pip install basedpyright ruff
 	ruff check
 	basedpyright
 	ruff format --check --diff
 
 lint-github:
+	@./scripts/ensure-venv.sh
 	# Requires ruff and basedpyright: python -m pip install basedpyright ruff
 	ruff check --output-format=github
 	basedpyright
 	ruff format --check --diff
 
 build-check:
+	@./scripts/ensure-venv.sh
 	# Requires Flit: python -m pip install flit
 	# Build, install locally, and attempt to run
 	flit build
