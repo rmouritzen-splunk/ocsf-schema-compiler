@@ -17,14 +17,13 @@ lint:
 	ruff format --check --diff
 
 lint-github:
-	@./scripts/ensure-venv.sh
 	# Requires ruff and basedpyright: python -m pip install basedpyright ruff
 	ruff check --output-format=github
 	basedpyright
 	ruff format --check --diff
 
 build-check:
-	@./scripts/ensure-venv.sh
+	@# NOTE: ./scripts/ensure-venv.sh doesn't work in Github workflows
 	# Requires Flit: python -m pip install flit
 	# Build, install locally, and attempt to run
 	flit build
