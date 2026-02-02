@@ -93,7 +93,7 @@ Here are the general cases that use extension prefixing:
 - Dictionary attribute names from extensions.
 - Dictionary attributes attributes whose types are extensions object use extension prefixes in their `object_type` fields.
 
-There is one weird exception to this. I've seen at one case where the legacy compiler has _both_ the extension scoped and unscoped dictionary attribute. This occurs with the `aws` extension with the `aws/last_used_time` and `last_used_time` dictionary attributes. I suspect this a side effect of the reverse merging bug mentioned in Difference 3.
+There is one weird exception to this. I've seen at one case where the legacy compiler has _both_ the extension scoped and unscoped dictionary attribute. This occurs with the `aws` extension with the `aws/last_used_time` and `last_used_time` dictionary attributes.
 
 ### Difference 8: class and object attribute profile change
 There are two differences here.
