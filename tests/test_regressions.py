@@ -180,9 +180,9 @@ def legacy_aws_diff_callback(
     left_diff: DiffValue,
     right_diff: DiffValue,
 ) -> bool:
-    # Legacy compiler add _both_ aws/last_used_time and last_used_time
+    # Legacy compiler adds _both_ aws/last_used_time and last_used_time
     # This compiler overwrites last_used_time, and then the scope_extension_keys option
-    # it to aws/last_user_time
+    # adds it to aws/last_user_time
     if (
         key == "dictionary_attributes"
         and isinstance(left_diff, DiffDictKeys)
@@ -207,7 +207,7 @@ def legacy_aws_diff_callback(
         and isinstance(right_diff, DiffDictKeys)
         and right_diff.keys == ["profiles"]
     ):
-        # This compiler does not needlessly set object and class "profiles" to null.
+        # This compiler does not needlessly set object and class "profiles" to null
         return True
 
     if (
