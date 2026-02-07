@@ -50,10 +50,10 @@ def is_hidden_object(obj_name: str) -> bool:
 
 
 def extension_scoped_category_uid(extension_uid: int, category_uid: int) -> int:
-    """Return an extension-specific category UID."""
+    """Return an extension-specific category UID for a base schema category."""
     assert category_uid < 100, (
         f"category_uid {category_uid} should be less than 100"
-        " (not yet extension UID scoped)"
+        " (not yet extension UID scoped); is this an extension category?"
     )
     return extension_uid * 100 + category_uid
 

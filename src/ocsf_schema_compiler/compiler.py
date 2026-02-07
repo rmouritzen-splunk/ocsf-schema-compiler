@@ -217,7 +217,9 @@ class SchemaCompiler:
         logger.info("Compiling schema")
 
         if not self.schema_path.is_dir():
-            raise FileNotFoundError(f"Schema path does not exist: {self.schema_path}")
+            raise FileNotFoundError(
+                f"Schema path is not a directory: {self.schema_path}"
+            )
 
         self._read_base_schema()
 
@@ -415,6 +417,10 @@ class SchemaCompiler:
             )
         if self.extensions_paths:
             for extensions_path in self.extensions_paths:
+                if not extensions_path.is_dir():
+                    raise FileNotFoundError(
+                        f"Extension path is not a directory: {extensions_path}"
+                    )
                 self._read_extensions_in_path(
                     extensions, extensions_path, is_platform_extension=False
                 )
@@ -1346,9 +1352,14 @@ class SchemaCompiler:
                     category_uid = j_integer(category.get("uid", 0))
 
             if "extension_id" in cls:
-                scoped_category_uid = extension_scoped_category_uid(
-                    j_integer(cls["extension_id"]), category_uid
-                )
+                if category and "extension_id" in category:
+                    # The category_uid is already extension scoped
+                    scoped_category_uid = category_uid
+                else:
+                    # Add extension scoping to base schema category
+                    scoped_category_uid = extension_scoped_category_uid(
+                        j_integer(cls["extension_id"]), category_uid
+                    )
                 cls_uid = category_scoped_class_uid(
                     scoped_category_uid, j_integer(cls.get("uid", 0))
                 )
