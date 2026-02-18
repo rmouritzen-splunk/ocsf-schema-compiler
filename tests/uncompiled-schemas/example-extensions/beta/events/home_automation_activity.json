@@ -1,0 +1,30 @@
+{
+  "uid": 1,
+  "caption": "Home Automation Activity",
+  "category": "home_automation",
+  "description": "Home automation event added by beta example extension.",
+  "name": "video_game_activity",
+  "extends": "base_event",
+  "attributes": {
+    "access_mask": {
+      "group": "primary",
+      "requirement": "recommended"
+    },
+    "activity_id": {
+      "enum": {
+        "1": {
+          "caption": "Install"
+        },
+        "2": {
+          "caption": "Update"
+        },
+        "3": {
+          "caption": "Run"
+        },
+        "4": {
+          "caption": "Uninstall"
+        }
+      }
+    }
+  }
+}

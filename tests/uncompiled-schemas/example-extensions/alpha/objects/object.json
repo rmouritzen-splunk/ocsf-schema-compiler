@@ -1,0 +1,13 @@
+{
+  "caption": "Object with Debug",
+  "description": "Patch from alpha example extension. Patches base object to add debug profile.",
+  "extends": "object",
+  "attributes": {
+    "$include": [
+      "profiles/debug.json"
+    ]
+  },
+  "profiles": [
+    "alpha/debug"
+  ]
+}

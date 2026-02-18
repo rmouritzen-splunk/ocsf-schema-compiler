@@ -17,93 +17,45 @@ from ocsf_schema_compiler.jsonish import (
     j_string_optional,
     j_integer,
     json_type_from_value,
+    deep_copy_j_object,
+    deep_copy_j_array,
+    deep_merge,
+    put_non_none,
 )
-from ocsf_schema_compiler.legacy_mode import (
-    add_extension_scope_to_items,
-    add_extension_scope_to_dictionary,
+from ocsf_schema_compiler.ocsf_utils import (
+    is_hidden_class,
+    is_hidden_object,
+    requirement_to_rank,
+    rank_to_requirement,
+)
+from ocsf_schema_compiler.scoping import (
+    extension_scoped_category_uid,
+    category_scoped_class_uid,
+    class_uid_scoped_type_uid,
+    to_extension_scoped_name,
 )
 from ocsf_schema_compiler.structured_read import (
     read_json_object_file,
     read_structured_items,
     read_patchable_structured_items,
 )
-from ocsf_schema_compiler.utils import (
-    deep_copy_j_object,
-    deep_copy_j_array,
-    deep_merge,
-    put_non_none,
-    is_hidden_class,
-    is_hidden_object,
-    extension_scoped_category_uid,
-    category_scoped_class_uid,
-    class_uid_scoped_type_uid,
-    pretty_json_encode,
-    quote_string,
-    requirement_to_rank,
-    rank_to_requirement,
-)
+from ocsf_schema_compiler.utils import pretty_json_encode, quote_string
+
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Extension:
-    base_path: Path
-    uid: int
-    name: str
-    is_platform_extension: bool
-    caption: str | None
-    description: str | None
-    version: str
-    categories: JObject
-    classes: JObject
-    class_patches: JObject
-    objects: JObject
-    object_patches: JObject
-    dictionary: JObject
-    profiles: JObject
+type PatchList = list[JObject]
+"""
+PatchList is a type alias for a list patches to an item (a class or object) held in a
+JObject. A list is needed because multiple extensions can patch the same item.
+"""
 
-    @override
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Extension):
-            return (
-                self.is_platform_extension == other.is_platform_extension
-                and self.uid == other.uid
-            )
-        return False
-
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, Extension):
-            return False
-        if self.is_platform_extension and other.is_platform_extension:
-            return self.uid < other.uid
-        if self.is_platform_extension and not other.is_platform_extension:
-            return True
-        if not self.is_platform_extension and other.is_platform_extension:
-            return False
-        return self.uid < other.uid
-
-
-def _extension_j_value_key(v: JValue):
-    """
-    Helper key function to sort values of SchemaCompiler._extensions consistent
-    with Extension dataclass
-    """
-    o = j_object(v)
-    return (not o["platform_extension?"], o["uid"])
-
-
-@dataclass
-class ProfileInfo:
-    is_extension_profile: bool
-    extension_name: str | None
-    caption: str
-
-
-# Type alias for dictionary from patch item name to a list of patch objects.
-# The value is list since different extensions can patch the same thing.
-type PatchList = list[JObject]  # list of patches for an item name
-type PatchDict = dict[str, PatchList]  # dict of item name to list of patches
+type PatchDict = dict[str, PatchList]
+"""
+PatchDict is a type alias for a dictionary from an item name (a class or object name)
+to a list of patches for that item.
+"""
 
 
 class SchemaCompiler:
@@ -112,23 +64,19 @@ class SchemaCompiler:
         schema_path: Path,
         ignore_platform_extensions: bool = False,
         extensions_paths: list[Path] | None = None,
+        allow_shadowing: bool = False,
         browser_mode: bool = False,
         legacy_mode: bool = False,
-        scope_extension_keys: bool = False,
     ) -> None:
         if browser_mode and legacy_mode:
             raise SchemaException("Browser mode and legacy mode are mutually exclusive")
-        if scope_extension_keys and not legacy_mode:
-            raise SchemaException(
-                "Scope extension keys option is only supported in legacy mode"
-            )
 
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
         self.extensions_paths: list[Path] | None = extensions_paths
+        self.allow_shadowing: bool = allow_shadowing
         self.browser_mode: bool = browser_mode
         self.legacy_mode: bool = legacy_mode
-        self.scope_extension_keys: bool = scope_extension_keys
 
         logger.info("Schema path: %s", self.schema_path)
         if self.ignore_platform_extensions:
@@ -146,6 +94,12 @@ class SchemaCompiler:
                 "Including extensions path(s): %s",
                 ", ".join(list(map(str, self.extensions_paths))),
             )
+        if self.allow_shadowing:
+            logger.info(
+                "Allow shadowing enabled. Names in extension can shadow base schema"
+                " names. Shadowed names block an extension ability to the base version"
+                " of the named item. Warnings will be logged when shadowing occurs."
+            )
         if self.browser_mode:
             logger.info(
                 "Browser mode enabled."
@@ -155,27 +109,10 @@ class SchemaCompiler:
         if self.legacy_mode:
             logger.info(
                 "Legacy mode enabled. Compiled output will be in legacy schema export"
-                " layout."
+                " format and layout."
             )
-            if self.scope_extension_keys:
-                logger.info(
-                    "Creating extension scoped keys similar to the legacy compiler."
-                    "\n    Note 1:"
-                    "\n    Extension scoped keys are not necessary. Scoped extension"
-                    " keys make diffs against the legacy schema export identical for"
-                    " many cases (see Note 2)."
-                    "\n    Note 2:"
-                    "\n    Differences occur for extensions with dictionary and"
-                    " category attributes that overwrite existing attributes, and are"
-                    " due to compiler implementation differences. These difference do"
-                    " not affect base schema compilations."
-                    "\n    Note 3:"
-                    "\n    Profiles defined in extensions are always scoped by"
-                    " extension."
-                )
 
         self._is_compiled: bool = False
-        self._error_count: int = 0
         self._warning_count: int = 0
         self._version: str = "0.0.0-undefined"
         self._categories: JObject = {}
@@ -186,13 +123,7 @@ class SchemaCompiler:
         self._objects: JObject = {}
         # object patches consolidated from all extensions
         self._object_patches: PatchDict = {}
-        # Profiles from the base schema
-        self._base_profiles: JObject = {}
-        # Profiles from all extensions - profile names (keys) are extension-scoped
-        self._extension_profiles: JObject = {}
-        # All profiles used for collision detection, mapping from unscoped profile name
-        # to a ProfileInfo instance
-        self._unscoped_profiles_info: dict[str, ProfileInfo] = {}
+        self._profiles: JObject = {}
         # The extensions here are just the extension information as used by the schema
         # browser, not the complete data used during schema compilation. The values in
         # this JObject are thus a subset of the information in the Extension dataclass.
@@ -251,26 +182,13 @@ class SchemaCompiler:
         self._consolidate_class_profiles()
         self._verify_class_attributes_and_add_datetime()
 
+        # TODO: we we need self._verify_profile_attributes_and_add_datetime() ?
+
         self._ensure_attributes_have_requirement()
 
         self._finish_attributes()
 
         output = self._create_compile_output()
-
-        if self._error_count and self._warning_count:
-            logger.error(
-                "Compile completed with %d error(s) and %d warning(s)",
-                self._error_count,
-                self._warning_count,
-            )
-        elif self._error_count and not self._warning_count:
-            logger.error(
-                "Compile completed with %d (tolerated) error(s)", self._error_count
-            )
-        elif self._warning_count:
-            logger.warning("Compile completed with %d warnings(s)", self._warning_count)
-        else:
-            logger.info("Compile completed successfully")
 
         logger.info("Compiled schema base version: %s", self._version)
         if self._extensions:
@@ -281,10 +199,19 @@ class SchemaCompiler:
                 pretty_json_encode(extensions),
             )
 
+        if self._warning_count:
+            logger.warning("Compile completed with %d warnings(s)", self._warning_count)
+        else:
+            logger.info("Compile completed successfully")
+
         return output
 
     def _warning(self, message: str, *args: JValue | Path) -> None:
+        """Log a warning with count tracking."""
         self._warning_count += 1
+        # NOTE: There should only be 2 direct calls to logger.warning in this
+        #       SchemaCompiler class: here and the final warning count in the
+        #       SchemaCompiler.compile method.
         logger.warning(message, *args)
 
     def _read_base_schema(self) -> None:
@@ -301,7 +228,7 @@ class SchemaCompiler:
             "objects",
             item_callback_fn=self._upgrade_attribute_profiles,
         )
-        self._base_profiles = read_structured_items(
+        self._profiles = read_structured_items(
             self.schema_path, "profiles", item_callback_fn=self._cache_profile
         )
         self._validate_base_profiles()
@@ -356,7 +283,7 @@ class SchemaCompiler:
         # Before potentially resolving includes of profiles and then later finding
         # issues we will validate profiles early to identify the source of problems.
         dictionary_attributes = j_object(self._dictionary.get("attributes", {}))
-        for profile_name, profile in self._base_profiles.items():
+        for profile_name, profile in self._profiles.items():
             profile = j_object(profile)
             profile_attributes = j_object(profile.get("attributes", {}))
             for attribute_name in profile_attributes.keys():
@@ -384,17 +311,24 @@ class SchemaCompiler:
 
         self._validate_extension_profiles(extensions)
 
+        # TODO: scoped - reexamine merging and overwriting with includes
         self._resolve_extension_includes(extensions)
 
         for extension in extensions:
-            self._fix_extension_profile_uses(extension)
+            # Add extension and extension_id values to most things in this extension
+            extension.annotate()
 
-        self._merge_categories_from_extensions(extensions)
-        self._merge_classes_from_extensions(extensions)
-        self._merge_objects_from_extensions(extensions)
-        self._merge_dictionary_from_extensions(extensions)
-        self._merge_profiles_from_extensions(extensions)
-        self._consolidate_extension_patches(extensions)
+        self._extension_scope_class_categories(extensions)
+        self._extension_scope_extends(extensions)
+        self._extension_scope_object_types(extensions)
+        self._extension_scope_all_profiles_uses(extensions)
+
+        self._merge_extensions_categories(extensions)
+        self._merge_extensions_classes(extensions)
+        self._merge_extensions_objects(extensions)
+        self._merge_extensions_dictionary(extensions)
+        self._merge_extensions_profiles(extensions)
+        self._append_extension_patches(extensions)
 
         # Create extension information. This information is needed for the
         # self._browser_mode output format, as well as the final information log showing
@@ -429,8 +363,6 @@ class SchemaCompiler:
         # This relies on sorting platform extensions before others
         # and then sorting by extension UID.
         extensions.sort()
-
-        self._enrich_extension_items(extensions)
         return extensions
 
     def _read_extensions_in_path(
@@ -469,13 +401,15 @@ class SchemaCompiler:
         extension_info_path = base_path / "extension.json"
         info = read_json_object_file(extension_info_path)
 
+        # The extension "uid" and "name" values are essential, so we will make sure
+        # they are set.
         uid = info.get("uid")
         name = info.get("name")
         if not isinstance(uid, int):
             t = json_type_from_value(uid)
             raise SchemaException(
                 f'The extension "uid" must be an integer but got {t}:'
-                " {extension_info_path}"
+                f" {extension_info_path}"
             )
         if not isinstance(name, str):
             t = json_type_from_value(name)
@@ -536,65 +470,6 @@ class SchemaCompiler:
             profiles=profiles,
         )
 
-    @staticmethod
-    def _enrich_extension_items(extensions: list[Extension]) -> None:
-        for extension in extensions:
-            try:
-                for category_detail in j_object(
-                    extension.categories.setdefault("attributes", {})
-                ).values():
-                    category_detail = j_object(category_detail)
-                    category_detail["uid"] = extension_scoped_category_uid(
-                        extension.uid, j_integer(category_detail["uid"])
-                    )
-                    category_detail["extension"] = extension.name
-                    category_detail["extension_id"] = extension.uid
-            except KeyError as e:
-                raise SchemaException(
-                    f'Malformed category in extension "{extension.name}" - missing {e}'
-                ) from e
-
-            for cls in extension.classes.values():
-                cls = j_object(cls)
-                cls["extension"] = extension.name
-                cls["extension_id"] = extension.uid
-
-            for cls_patch in extension.class_patches.values():
-                cls_patch = j_object(cls_patch)
-                cls_patch["extension"] = extension.name
-                cls_patch["extension_id"] = extension.uid
-
-            for obj in extension.objects.values():
-                obj = j_object(obj)
-                obj["extension"] = extension.name
-                obj["extension_id"] = extension.uid
-
-            for obj_patch in extension.object_patches.values():
-                obj_patch = j_object(obj_patch)
-                obj_patch["extension"] = extension.name
-                obj_patch["extension_id"] = extension.uid
-
-            for dictionary_attribute in j_object(
-                extension.dictionary.setdefault("attributes", {})
-            ).values():
-                dictionary_attribute = j_object(dictionary_attribute)
-                dictionary_attribute["extension"] = extension.name
-                dictionary_attribute["extension_id"] = extension.uid
-
-            dictionary_types = j_object(extension.dictionary.setdefault("types", {}))
-            dictionary_types_attributes = j_object(
-                dictionary_types.setdefault("attributes", {})
-            )
-            for dictionary_type in dictionary_types_attributes.values():
-                dictionary_type = j_object(dictionary_type)
-                dictionary_type["extension"] = extension.name
-                dictionary_type["extension_id"] = extension.uid
-
-            for profile in extension.profiles.values():
-                profile = j_object(profile)
-                profile["extension"] = extension.name
-                profile["extension_id"] = extension.uid
-
     def _validate_extension_profiles(self, extensions: list[Extension]) -> None:
         # Instead of resolving includes of profiles and then later finding issues, we
         # will validate profiles early so help identify the source of problems.
@@ -611,43 +486,94 @@ class SchemaCompiler:
                         attribute_name not in base_dictionary_attributes
                         and attribute_name not in ext_dictionary_attributes
                     ):
-                        if (
-                            extension.name == "splunk"
-                            and profile_name == "splunk"
-                            and self._version == "1.0.0-rc.2"
-                        ):
-                            # This is a known issue with the 1.0.0-rc.2 with "splunk"
-                            # extension compilation, so we will log this specific case.
-                            # TODO: Remove the unused splunk extension from the splunk
-                            #       extension. After this is fixed we can remove this
-                            #       special-case.
-                            self._warning(
-                                'Ignoring know issue with "splunk" extension: attribute'
-                                ' "%s" in profile "splunk" is not a defined dictionary'
-                                " attribute.\n\n    PLEASE FIX by removing the unused"
-                                ' "splunk" profile.\n',
-                                attribute_name,
-                            )
-                        else:
-                            raise SchemaException(
-                                f'Attribute "{attribute_name}" in extension'
-                                f' "{extension.name}" profile "{profile_name}" is not a'
-                                " defined dictionary attribute"
-                            )
+                        raise SchemaException(
+                            f'Attribute "{attribute_name}" in extension'
+                            f' "{extension.name}" profile "{profile_name}" is not a'
+                            " defined dictionary attribute"
+                        )
 
-    def _fix_extension_profile_uses(self, extension: Extension) -> None:
-        self._fix_extension_profile_uses_in_items(extension, extension.classes, "class")
-        self._fix_extension_profile_uses_in_items(
-            extension, extension.class_patches, "class patch"
-        )
-        self._fix_extension_profile_uses_in_items(
-            extension, extension.objects, "object"
-        )
-        self._fix_extension_profile_uses_in_items(
-            extension, extension.object_patches, "object patch"
-        )
+    def _extension_scope_class_categories(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            ext_cat_attributes = extension.categories.get("attributes", {})
+            for cls in extension.classes.values():
+                cls = j_object(cls)
+                cat_name = j_string_optional(cls.get("category"))
+                if cat_name and ext_cat_attributes:
+                    cls["category"] = f"{extension.name}/{cat_name}"
 
-    def _fix_extension_profile_uses_in_items(
+    def _extension_scope_extends(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            for cls in extension.classes.values():
+                cls = j_object(cls)
+                extends = j_string_optional(cls.get("extends"))
+                if extends and extends in extension.classes:
+                    cls["extends"] = f"{extension.name}/{extends}"
+
+            for obj in extension.objects.values():
+                obj = j_object(obj)
+                extends = j_string_optional(obj.get("extends"))
+                if extends and extends in extension.objects:
+                    obj["extends"] = f"{extension.name}/{extends}"
+
+    def _extension_scope_object_types(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            for cls in extension.classes.values():
+                cls = j_object(cls)
+                self._extension_scope_attribute_object_types(
+                    extension,
+                    j_object(cls.setdefault("attributes", {})),
+                )
+            for cls_patch in extension.class_patches.values():
+                cls_patch = j_object(cls_patch)
+                self._extension_scope_attribute_object_types(
+                    extension,
+                    j_object(cls_patch.setdefault("attributes", {})),
+                )
+            for obj in extension.objects.values():
+                obj = j_object(obj)
+                self._extension_scope_attribute_object_types(
+                    extension,
+                    j_object(obj.setdefault("attributes", {})),
+                )
+            for obj_patch in extension.object_patches.values():
+                obj_patch = j_object(obj_patch)
+                self._extension_scope_attribute_object_types(
+                    extension,
+                    j_object(obj_patch.setdefault("attributes", {})),
+                )
+            self._extension_scope_attribute_object_types(
+                extension,
+                j_object(extension.dictionary.setdefault("attributes", {})),
+            )
+
+    def _extension_scope_attribute_object_types(
+        self,
+        extension: Extension,
+        attributes: JObject,
+    ) -> None:
+        for attribute in attributes.values():
+            attribute = j_object(attribute)
+            if "type" in attribute:
+                type_name = attribute["type"]
+                if type_name in extension.objects:
+                    attribute["type"] = f"{extension.name}/{type_name}"
+
+    def _extension_scope_all_profiles_uses(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            self._extension_scope_profile_in_items(
+                extension, extension.classes, "class"
+            )
+            self._extension_scope_profile_in_items(
+                extension, extension.class_patches, "class patch"
+            )
+            self._extension_scope_profile_in_items(
+                extension, extension.objects, "object"
+            )
+            self._extension_scope_profile_in_items(
+                extension, extension.object_patches, "object patch"
+            )
+
+    def _extension_scope_profile_in_items(
         self, extension: Extension, items: JObject, kind: str
     ) -> None:
         # Structured items can be classes, objects, class patches, or object patches
@@ -660,7 +586,7 @@ class SchemaCompiler:
                 fixed_item_profiles: JArray = []
                 for profile_name in item_profiles:
                     fixed_item_profiles.append(
-                        self._fix_extension_profile(
+                        self._optionally_extension_scope_profile(
                             extension, j_string(profile_name), profiles_context
                         )
                     )
@@ -675,7 +601,7 @@ class SchemaCompiler:
                         attribute_context = (
                             f'{item_context} attribute "{attribute_name}"'
                         )
-                        attribute["profile"] = self._fix_extension_profile(
+                        attribute["profile"] = self._optionally_extension_scope_profile(
                             extension, profile_name, attribute_context
                         )
                 else:
@@ -687,13 +613,13 @@ class SchemaCompiler:
                         fixed_attribute_profiles: JArray = []
                         for profile_name in attribute_profiles:
                             fixed_attribute_profiles.append(
-                                self._fix_extension_profile(
+                                self._optionally_extension_scope_profile(
                                     extension, j_string(profile_name), attribute_context
                                 )
                             )
                         attribute["profiles"] = fixed_attribute_profiles
 
-    def _fix_extension_profile(
+    def _optionally_extension_scope_profile(
         self, extension: Extension, profile_name: str, context: str
     ) -> str:
         """
@@ -732,7 +658,7 @@ class SchemaCompiler:
                 )
                 return scoped_profile_name
 
-            elif profile_name in self._base_profiles:
+            elif profile_name in self._profiles:
                 # This is fine
                 logger.debug('%s uses base schema profile "%s"', context, profile_name)
             else:
@@ -1002,278 +928,122 @@ class SchemaCompiler:
                 f"{context} file does not exist: {include_path}"
             ) from e
 
-    def _merge_categories_from_extensions(self, extensions: list[Extension]) -> None:
+    def _merge_extensions_categories(self, extensions: list[Extension]) -> None:
+        base_cat_attributes = j_object(self._categories.setdefault("attributes", {}))
         for extension in extensions:
-            self._merge_extension_attributes(
-                extension, self._categories, extension.categories, "category"
-            )
+            if "attributes" in extension.categories:
+                ext_cat_attributes = j_object(extension.categories["attributes"])
+                for cat_name, cat in ext_cat_attributes.items():
+                    if "/" in cat_name:
+                        raise SchemaException(
+                            f"Illegal use of extension-scope in extension"
+                            f' "{extension.name}" category name "{cat_name}"'
+                        )
+                    base_cat_attributes[f"{extension.name}/{cat_name}"] = cat
 
-    def _merge_classes_from_extensions(self, extensions: list[Extension]) -> None:
+    def _merge_extensions_classes(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             if extension.classes:
                 self._merge_extension_items(
                     extension.name, extension.classes, self._classes, "class"
                 )
 
-    def _merge_objects_from_extensions(self, extensions: list[Extension]) -> None:
+    def _merge_extensions_objects(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             if extension.objects:
                 self._merge_extension_items(
                     extension.name, extension.objects, self._objects, "object"
                 )
 
-    def _merge_dictionary_from_extensions(self, extensions: list[Extension]) -> None:
-        for extension in extensions:
-            self._merge_extension_attributes(
-                extension, self._dictionary, extension.dictionary, "dictionary"
-            )
-
-    def _merge_profiles_from_extensions(self, extensions: list[Extension]) -> None:
-        # Extension profiles are extension scoped because those scoped names appear in
-        # concrete events. We must maintain the once case of extension-scoped names.
-        for extension in extensions:
-            if extension.profiles:
-                # We cannot use self._merge_extension_items since we need to use
-                # extension-scoped keys in the self._extension_profiles dictionary, as
-                # well as add profile with unscoped name to the
-                # self._all_profiles_unscoped dictionary.
-                for unscoped_profile_name, profile in extension.profiles.items():
-                    profile = j_object(profile)
-                    if "/" in unscoped_profile_name:
-                        raise SchemaException(
-                            f'Unexpected scoped profile name in "{extension.name}"'
-                            f' profile "{unscoped_profile_name}"'
-                        )
-
-                    if unscoped_profile_name in self._unscoped_profiles_info:
-                        other_profile_info = self._unscoped_profiles_info[
-                            unscoped_profile_name
-                        ]
-                        if other_profile_info.is_extension_profile:
-                            where_defined = (
-                                f'extension "{other_profile_info.extension_name}"'
-                            )
-                        else:
-                            where_defined = "base scheme"
-                        raise SchemaException(
-                            f'Collision: extension "{extension.name}" profile unscoped'
-                            f' name "{unscoped_profile_name}" collides with'
-                            f" {where_defined} profile with caption"
-                            f' "{other_profile_info.caption}"'
-                        )
-
-                    scoped_profile_name = f"{extension.name}/{unscoped_profile_name}"
-                    if scoped_profile_name in self._extension_profiles:
-                        other_profile = j_object(
-                            self._extension_profiles[scoped_profile_name]
-                        )
-                        raise SchemaException(
-                            f'Collision: extension "{extension.name}" profile'
-                            f' "{scoped_profile_name}" collides with extension profile'
-                            f" with caption"
-                            f' "{other_profile.get("caption", "<no caption>")}"'
-                        )
-
-                    self._extension_profiles[scoped_profile_name] = profile
-                    self._unscoped_profiles_info[unscoped_profile_name] = ProfileInfo(
-                        is_extension_profile=True,
-                        extension_name=extension.name,
-                        caption=j_string(profile.get("caption", "<no caption>")),
-                    )
-
-    def _merge_extension_attributes(
+    def _merge_extension_items(
         self,
-        extension: Extension,
-        base_item: JObject,
-        extension_item: JObject,
+        extension_name: str,
+        extension_items: JObject,
+        base_items: JObject,
         kind: str,
     ) -> None:
-        """
-        Merge attributes from extension_item into base_item, preferring base_item's
-        information. This is used for extension category and dictionary merging.
-
-        In this method, "base" refers to the existing definition at this point of the
-        compile process. It could be a definition from the base schema (without
-        platform extensions) or another extension processed earlier.
-
-        For an attribute that exists in extension_item but not base_item, the attribute
-        is simply added. For an attribute that exists in both the extension_item and
-        base_item, the attribute is merged only if the change is safe.
-
-        For dictionaries, this also safely merges the extension item's dictionary type
-        attributes, adding any dictionary types defined in the extension. Modifying
-        types is not supported, as this can result in unwanted incompatibilities.
-        (We could contemplate allow equivalent type definitions in the future.)
-        There is one special case of dictionary type modification that is allowed: the
-        1.0.0-rc.2 schema has a known problem with some of its subtypes, and in this
-        one case extensions are allowed to fix the issue with a deep merge. The
-        "splunk" extension fixes these specific issues.
-        """
-        base_attributes = j_object(base_item.setdefault("attributes", {}))
-        ext_attributes = j_object(extension_item.get("attributes", {}))
-        for ext_attribute_name, ext_attribute in ext_attributes.items():
-            base_attribute = j_object_optional(base_attributes.get(ext_attribute_name))
-            ext_attribute = j_object(ext_attribute)
-            if base_attribute:
-                # First, check if this is an attempt to overwrite another extension.
-                if "extension" in base_attribute:
-                    # This is not allowed as the result is non-deterministic, depending
-                    # on the order the extensions are processed. We have no notion of
-                    # extension precedence, so this is not supported.
-                    raise SchemaException(
-                        f'Collision: extension "{extension.name}" {kind} attribute'
-                        f' "{ext_attribute_name}" collides with attribute from'
-                        f' extension "{base_attribute["extension"]}"; extensions are'
-                        f" not allowed to modify each other as the results are"
-                        f" non-deterministic"
-                    )
-
-                # Second check for a type change. This is not supported as it creates a
-                # schema that is not compatible with the base schema.
-                if "type" in ext_attribute:
-                    if ext_attribute["type"] != base_attribute["type"]:
-                        if (
-                            self._version == "1.0.0-rc.2"
-                            and ext_attribute_name == "duration"
-                            and ext_attribute["extension"] == "splunk"
-                        ):
-                            logger.info(
-                                "Allowing fix of known issue in schema version"
-                                ' 1.0.0-rc.2 by extension "splunk": base schema'
-                                ' dictionary attribute "duration" is type "integer_t"'
-                                ' but should be "long_t"'
-                            )
-                        else:
-                            raise SchemaException(
-                                f'Extension "{extension.name}" {kind} attribute'
-                                f' "{ext_attribute_name}" attempted to make unsafe type'
-                                f'  change; "{ext_attribute["type"]}" overwriting'
-                                f' existing "{base_attribute["type"]}"'
-                            )
-                    if (
-                        ext_attribute["type"] == "object_t"
-                        # no need to check if base_attribute["type"] == "object_t"
-                        # since we already know both types are the same
-                        and ext_attribute["object_type"]
-                        != base_attribute["object_type"]
-                    ):
-                        raise SchemaException(
-                            f'Extension "{extension.name}" {kind} attribute'
-                            f' "{ext_attribute_name}" attempted to make unsafe object'
-                            f' type change; "{ext_attribute["object_type"]}"'
-                            f' overwriting existing "{base_attribute["object_type"]}"'
-                        )
-
-                # Third, check if the attribute's requirement is being relaxed. This is
-                # not supported as it creates a schema that is incompatible with the
-                # a schema that does not include the extension.
-                ext_req = j_string_optional(ext_attribute.get("requirement"))
-                base_req = j_string_optional(base_attribute.get("requirement"))
-                if requirement_to_rank(ext_req) < requirement_to_rank(base_req):
-                    raise SchemaException(
-                        f'Extension "{extension.name}" {kind} attribute'
-                        f' "{ext_attribute_name}" attempted to make unsafe requirement'
-                        f" change with {quote_string(ext_req)} reducing existing"
-                        f" requirement of {quote_string(base_req)}"
-                    )
-
-                # TODO: Safely handle enum merges
-                # Other changes are safe. So merge.
-                logger.info(
-                    'Extension "%s" %s attribute "%s" is safely merging over existing'
-                    " attribute",
-                    extension.name,
-                    kind,
-                    ext_attribute_name,
-                )
-                logger.debug(
-                    "\n    extension keys:"
-                    "\n        %s"
-                    "\n    merging over existing keys:"
-                    "\n        %s",
-                    sorted(ext_attribute.keys()),
-                    sorted(base_attribute.keys()),
-                )
-
-                deep_merge(base_attribute, ext_attribute)
-
-            else:
-                # The extension is adding new attribute
-                base_attributes[ext_attribute_name] = ext_attribute
-
-        # For the dictionary case, safely merge the types form the extension into the
-        # base, without overwriting.
-        # Note: the legacy compiler did a deep merge of types attributes.
-        if "types" in extension_item:
-            base_types = j_object(base_item.setdefault("types", {}))
-            base_types_attributes = j_object(base_types.setdefault("attributes", {}))
-            ext_types = j_object(extension_item["types"])
-            ext_types_attributes = j_object(ext_types.setdefault("attributes", {}))
-            # Legacy compiler variation:
-            #     deep_merge(base_types_attributes, extension_types_attributes)
-            for ext_attribute_name, ext_attribute in ext_types_attributes.items():
-                ext_attribute = j_object(ext_attribute)
-                if ext_attribute_name in base_types_attributes:
-                    base_attribute = j_object(base_types_attributes[ext_attribute_name])
-                    if "extension" in base_attribute:
-                        base_desc = f'extension "{base_attribute["extension"]}"'
-                    else:
-                        base_desc = "base schema"
-                    if (
-                        self._version == "1.0.0-rc.2"
-                        and ext_attribute["extension"] == "splunk"
-                        and ext_attribute_name
-                        in {
-                            "bytestring_t",
-                            "file_hash_t",
-                            "resource_uid_t",
-                            "subnet_t",
-                            "uuid_t",
-                        }
-                    ):
-                        # Schema version 1.0.0-rc.2 has a known issue. Some of its
-                        # dictionary types are subtypes that do not define their base
-                        # type. We will allow extensions merge types in these cases.
-                        # The "splunk" extension fixes actually does fix these issues.
-                        # NOTE: only dictionary subtypes define "type", so we cannot
-                        # do a general validation.
-                        logger.info(
-                            "Allowing fix of known issue in schema version 1.0.0-rc.2"
-                            ' by extension "splunk": %s dictionary type "%s" is a'
-                            ' subtype but does not define "type"',
-                            base_desc,
-                            ext_attribute_name,
-                        )
-                        deep_merge(base_attribute, ext_attribute)
-                    else:
-                        raise SchemaException(
-                            f'Collision: extension "{extension.name}" {kind} dictionary'
-                            f' type "{ext_attribute_name}" is trying to overwrite'
-                            f" {base_desc} type; modifying dictionary types is not"
-                            f" supported"
-                        )
-                else:
-                    base_types_attributes[ext_attribute_name] = ext_attribute
-
-    @staticmethod
-    def _merge_extension_items(
-        extension_name: str, extension_items: JObject, items: JObject, kind: str
-    ) -> None:
+        """Merge extension class and objects."""
         for ext_item_name, ext_item in extension_items.items():
-            if ext_item_name in items:
-                item = j_object(items[ext_item_name])
-                if "extension" in item:
-                    item_kind = f'extension "{item["extension"]}" {kind}'
-                else:
-                    item_kind = f"base schema {kind}"
-                raise SchemaException(
-                    f'Collision: extension "{extension_name}" {kind} "{ext_item_name}"'
-                    f" collides with {item_kind} with caption"
-                    f' "{item.get("caption", "")}"'
-                )
-            items[ext_item_name] = ext_item
+            self._check_shadowed_name(extension_name, kind, ext_item_name, base_items)
+            base_items[f"{extension_name}/{ext_item_name}"] = ext_item
 
-    def _consolidate_extension_patches(self, extensions: list[Extension]) -> None:
+    def _merge_extensions_dictionary(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            self._merge_extension_dictionary(extension)
+
+    def _merge_extension_dictionary(self, extension: Extension) -> None:
+        base_dict_attributes = j_object(self._dictionary.setdefault("attributes", {}))
+        ext_dict_attributes = j_object(extension.dictionary.get("attributes", {}))
+        for ext_attribute_name, ext_attribute in ext_dict_attributes.items():
+            self._check_shadowed_name(
+                extension.name,
+                "dictionary attribute",
+                ext_attribute_name,
+                base_dict_attributes,
+            )
+
+            ext_attribute = j_object(ext_attribute)
+            if "overwrite" in ext_attribute:
+                raise SchemaException(
+                    f'Unsupported use of "overwrite" in extension "{extension.name}"'
+                    f' dictionary attribute "{ext_attribute_name}"'
+                )
+
+            base_dict_attributes[f"{extension.name}/{ext_attribute_name}"] = (
+                ext_attribute
+            )
+
+        if "types" in extension.dictionary:
+            base_types = j_object(self._dictionary.setdefault("types", {}))
+            base_types_attributes = j_object(base_types.setdefault("attributes", {}))
+            ext_types = j_object(extension.dictionary["types"])
+            ext_types_attributes = j_object(ext_types.setdefault("attributes", {}))
+            for ext_type_name, ext_type in ext_types_attributes.items():
+                if "/" in ext_type_name:
+                    raise SchemaException(
+                        "Illegal use of extension-scope in extension"
+                        f' "{extension.name}" dictionary type "{ext_type_name}"'
+                    )
+                ext_type = j_object(ext_type)
+                if ext_type_name in base_types_attributes:
+                    base_attribute = j_object(base_types_attributes[ext_type_name])
+                    # TODO: scoped - allow if shadowing is enabled
+                    if "extension" in base_attribute:
+                        raise SchemaException(
+                            "LOGIC BUG: base dictionary type with unscoped name"
+                            f' "{ext_type_name}" unexpectedly has "extension" field'
+                        )
+                    # TODO: scoped - mention flag to allow shadowing
+                    # raise SchemaException(
+                    #     f'Extension "{extension.name}" dictionary type'
+                    #     f' "{ext_type_name}" shadows base dictionary type'
+                    # )
+                    # TODO: scoped - for now we are using unscoped dictionary types
+                    #       considering scoping (by default)
+                    #       Also for now, this is a collision error
+                    raise SchemaException(
+                        f'Extension "{extension.name}" dictionary type'
+                        f' "{ext_type_name}" collides with base dictionary type'
+                    )
+
+                # TODO: scoped - for now we are using unscoped dictionary types
+                #       considering scoping (by default)
+                # base_types_attributes[f"{extension.name}/{ext_type_name}"] = ext_type
+                base_types_attributes[ext_type_name] = ext_type
+
+    def _merge_extensions_profiles(self, extensions: list[Extension]) -> None:
+        for extension in extensions:
+            if extension.profiles:
+                for profile_name, profile in extension.profiles.items():
+                    self._check_shadowed_name(
+                        extension.name,
+                        "profile",
+                        profile_name,
+                        self._profiles,
+                    )
+                    self._profiles[f"{extension.name}/{profile_name}"] = profile
+
+    def _append_extension_patches(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             for patch_name, patch in extension.class_patches.items():
                 patches = self._class_patches.setdefault(patch_name, [])
@@ -1291,18 +1061,18 @@ class SchemaCompiler:
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         for attribute_name, attribute in dictionary_attributes.items():
             attribute = j_object(attribute)
-            attribute_type = attribute.get("type")
-            if attribute_type not in types_attributes:
+            attribute_type_name = j_string(attribute.get("type"))
+            if attribute_type_name not in types_attributes:
                 attribute["type"] = "object_t"
-                attribute["object_type"] = attribute_type
-                if attribute_type not in self._objects:
+                if attribute_type_name not in self._objects:
                     raise SchemaException(
                         self._dictionary_error_message(
                             attribute_name,
                             attribute,
-                            f'uses undefined object "{attribute_type}"',
+                            f'uses undefined object "{attribute_type_name}"',
                         )
                     )
+                attribute["object_type"] = attribute_type_name
 
     def _process_classes(self) -> None:
         # Extracting observables is easier to do before resolving (flattening) "extends"
@@ -1338,7 +1108,7 @@ class SchemaCompiler:
 
     def _enrich_classes(self) -> None:
         # enrich classes
-        categories = j_object(self._categories.setdefault("attributes", {}))
+        cat_attributes = j_object(self._categories.setdefault("attributes", {}))
         for cls_name, cls in self._classes.items():
             cls = j_object(cls)
             # update class uid
@@ -1346,7 +1116,7 @@ class SchemaCompiler:
             category_uid = 0
             category_key = j_string_optional(cls.get("category"))
             if category_key:
-                category = j_object_optional(categories.get(category_key))
+                category = j_object_optional(cat_attributes.get(category_key))
                 if category:
                     cls["category_name"] = category.get("caption")
                     category_uid = j_integer(category.get("uid", 0))
@@ -1493,39 +1263,33 @@ class SchemaCompiler:
         """Detect observable collisions and build up information for schema browser."""
         for cls_name, cls in self._classes.items():
             cls = j_object(cls)
-            context = "base schema"
-            self._validate_class_observables(
-                cls_name, cls, "base schema", is_patch=False
-            )
+            self._validate_class_observables(cls_name, cls, is_patch=False)
             self._observables_from_item_attributes(
-                self._classes, cls_name, cls, "Class", context, is_patch=False
+                self._classes, cls_name, cls, "Class", is_patch=False
             )
             self._observables_from_item_observables(
-                self._classes, cls_name, cls, "Class", context, is_patch=False
+                self._classes, cls_name, cls, "Class", is_patch=False
             )
 
         for patch_name, patch_list in self._class_patches.items():
             for patch in patch_list:
-                context = f'"{patch["extension"]}" extension patch'
-                self._validate_class_observables(
-                    patch_name, patch, context, is_patch=True
-                )
+                self._validate_class_observables(patch_name, patch, is_patch=True)
                 self._observables_from_item_attributes(
-                    self._classes, patch_name, patch, "Class", context, is_patch=True
+                    self._classes, patch_name, patch, "Class", is_patch=True
                 )
                 self._observables_from_item_observables(
-                    self._classes, patch_name, patch, "Class", context, is_patch=True
+                    self._classes, patch_name, patch, "Class", is_patch=True
                 )
 
     @staticmethod
     def _validate_class_observables(
-        cls_name: str, cls: JObject, context: str, is_patch: bool
+        cls_name: str, cls: JObject, is_patch: bool
     ) -> None:
         if "observable" in cls:
             raise SchemaException(
                 'Illegal definition of one or more attributes with "observable" in'
-                f' {context} class "{cls_name}". Defining class-level observables is'
-                ' not supported (this would be redundant). Instead use the "class_uid"'
+                f' class "{cls_name}". Defining class-level observables is not'
+                ' supported (this would be redundant). Instead use the "class_uid"'
                 " attribute for querying, correlating, and reporting."
             )
 
@@ -1535,62 +1299,55 @@ class SchemaCompiler:
                 if "observable" in j_object(attribute):
                     raise SchemaException(
                         'Illegal definition of one or more attributes with "observable"'
-                        f' definition in {context} hidden class "{cls_name}". This'
-                        " would cause colliding definitions of the same observable"
-                        " type_id values in all children of this class. Instead, define"
-                        " observables (of any kind) in non-hidden child classes of"
-                        f' "{cls_name}".'
+                        f' definition in hidden class "{cls_name}". This would cause'
+                        " colliding definitions of the same observable type_id values"
+                        " in all children of this class. Instead, define observables"
+                        f' (of any kind) in non-hidden child classes of "{cls_name}".'
                     )
 
             if "observables" in cls:
                 raise SchemaException(
-                    f'Illegal "observables" definition in {context} hidden class'
-                    f' "{cls_name}". This would cause colliding definitions of the same'
-                    " observable type_id values in all children of this class. Instead,"
-                    " define observables (of any kind) in non-hidden child classes of'"
+                    f'Illegal "observables" definition in hidden class "{cls_name}".'
+                    " This would cause colliding definitions of the same observable"
+                    " type_id values in all children of this class. Instead, define"
+                    " observables (of any kind) in non-hidden child classes of'"
                     f' "{cls_name}".'
                 )
 
     def _observables_from_objects(self) -> None:
         """Detect observable collisions and build up information for schema browser."""
-        context = "base schema"
         for obj_name, obj in self._objects.items():
             obj = j_object(obj)
-            self._validate_object_observables(
-                obj_name, obj, "base schema", is_patch=False
-            )
-            self._observables_from_object(obj_name, obj, context)
+            self._validate_object_observables(obj_name, obj, is_patch=False)
+            self._observables_from_object(obj_name, obj)
             self._observables_from_item_attributes(
-                self._objects, obj_name, obj, "Object", context, is_patch=False
+                self._objects, obj_name, obj, "Object", is_patch=False
             )
             # Not supported:
             # self._observables_from_item_observables(self._objects, obj_name, obj,
-            #     "Object", context, is_patch=False)
+            #     "Object", is_patch=False)
 
         for patch_name, patch_list in self._object_patches.items():
             for patch in patch_list:
-                context = f'extension "{patch["extension"]}" patch'
-                self._validate_object_observables(
-                    patch_name, patch, context, is_patch=True
-                )
-                self._observables_from_object(patch_name, patch, context)
+                self._validate_object_observables(patch_name, patch, is_patch=True)
+                self._observables_from_object(patch_name, patch)
                 self._observables_from_item_attributes(
-                    self._objects, patch_name, patch, "Object", context, is_patch=True
+                    self._objects, patch_name, patch, "Object", is_patch=True
                 )
                 # Not supported:
                 # self._observables_from_item_observables(self._objects, patch_name,
-                #     patch, "Object", context, is_patch=True)
+                #     patch, "Object", is_patch=True)
 
     @staticmethod
     def _validate_object_observables(
-        obj_name: str, obj: JObject, context: str, is_patch: bool
+        obj_name: str, obj: JObject, is_patch: bool
     ) -> None:
         if "observables" in obj:
             # Attribute-path observables would be tricky to implement as a
             # machine-driven enrichment. It would require tracking the relative from the
             # point of the object down that tree of an overall OCSF event.
             raise SchemaException(
-                f'Illegal "observables" definition in {context} object "{obj_name}".'
+                f'Illegal "observables" definition in object "{obj_name}".'
                 f" Object-specific attribute path observables are not supported."
                 f" Please file an issue if you find this feature necessary."
             )
@@ -1601,25 +1358,23 @@ class SchemaCompiler:
                 if "observable" in j_object(attribute_detail):
                     raise SchemaException(
                         f"Illegal definition of one or more attributes with"
-                        f' "observable" definition in {context} hidden object'
-                        f' "{obj_name}". This would cause colliding definitions of the'
-                        f" same observable type_id values in all children of this"
-                        f" object. Instead, define observables (of any kind) in"
-                        f' non-hidden child objects of "{obj_name}".'
+                        f' "observable" definition in hidden object "{obj_name}".'
+                        f" This would cause colliding definitions of the same"
+                        f" observable type_id values in all children of this object."
+                        f" Instead, define observables (of any kind) in non-hidden"
+                        f' child objects of "{obj_name}".'
                     )
 
             if "observable" in obj:
                 raise SchemaException(
-                    f'Illegal "observable" definition in {context} hidden object'
-                    f' "{obj_name}". This would cause colliding definitions of the same'
-                    f" observable type_id values in all children of this object."
-                    f" Instead, define observables (of any kind) in non-hidden child"
-                    f' objects of "{obj_name}".'
+                    f'Illegal "observable" definition in hidden object "{obj_name}".'
+                    f" This would cause colliding definitions of the same observable"
+                    f" type_id values in all children of this object. Instead, define"
+                    f" observables (of any kind) in non-hidden child objects of"
+                    f' "{obj_name}".'
                 )
 
-    def _observables_from_object(
-        self, obj_name: str, obj: JObject, context: str
-    ) -> None:
+    def _observables_from_object(self, obj_name: str, obj: JObject) -> None:
         caption, description = self._find_item_caption_and_description(
             self._objects, obj_name, obj
         )
@@ -1629,7 +1384,7 @@ class SchemaCompiler:
                 entry = j_object(self._observable_type_id_dict[observable_type_id])
                 raise SchemaException(
                     f"Collision of observable type_id {observable_type_id} between"
-                    f' {context} "{caption}" object "observable" and'
+                    f' "{caption}" object "observable" and'
                     f' "{entry["caption"]}": {entry["description"]}'
                 )
             entry = self._make_observable_enum_entry(caption, description, "Object")
@@ -1641,7 +1396,6 @@ class SchemaCompiler:
         item_name: str,
         item: JObject,
         kind: str,
-        context: str,
         is_patch: bool,
     ) -> None:
         # kind should be "Class" or "Object"
@@ -1660,7 +1414,7 @@ class SchemaCompiler:
                     entry = j_object(self._observable_type_id_dict[observable_type_id])
                     raise SchemaException(
                         f"Collision of observable type_id {observable_type_id}"
-                        f' between {context} {kind} "{item_name}" caption "{caption}"'
+                        f' between {kind} "{item_name}" caption "{caption}"'
                         f' attribute "{attribute_name}" "observable" and'
                         f' "{entry["caption"]}": {entry["description"]}'
                     )
@@ -1679,7 +1433,6 @@ class SchemaCompiler:
         item_name: str,
         item: JObject,
         kind: str,
-        context: str,
         is_patch: bool,
     ) -> None:
         # kind should be title-case: "Class" or "Object"
@@ -1699,7 +1452,7 @@ class SchemaCompiler:
                     entry = j_object(self._observable_type_id_dict[observable_type_id])
                     raise SchemaException(
                         f"Collision of observable type_id {observable_type_id} between"
-                        f' {context} {kind} "{item_name}" caption "{caption}"'
+                        f' {kind} "{item_name}" caption "{caption}"'
                         f' "observables" attribute path "{attribute_path}" and'
                         f' "{entry["caption"]}": {entry["description"]}'
                     )
@@ -1779,7 +1532,8 @@ class SchemaCompiler:
     def _resolve_patches(self, items: JObject, patches: PatchDict, kind: str) -> None:
         for patch_name, patch_list in patches.items():
             for patch in patch_list:
-                base_name = patch["extends"]  # this will be the same as patch_name
+                # base_name will be the same as patch_name
+                base_name = j_string(patch["extends"])
                 assert patch_name == base_name, (
                     f'Patch name "{patch_name}" should match extends base name'
                     f' "{base_name}"'
@@ -1794,27 +1548,20 @@ class SchemaCompiler:
                     )
 
                 base = j_object(items[base_name])
-                base_from = "base schema"
 
                 if "extension" in base:
-                    ext_name = j_string(base["extension"])
-                    ext = j_object(self._extensions[ext_name])
-                    if not ext["platform_extension?"]:
-                        # Patching of platform extensions is allowed, as this is
-                        # effectively the same as patching the core schema.
-                        # Patching of non-platform extensions, however, is not allowed
-                        # to accidental modifications (or intentional abuse).
-                        raise SchemaException(
-                            f"Illegal patch attempt: {context} attempted to patch"
-                            f' "{base_name}" from extension "{base["extension"]}";'
-                            f" extensions are not allowed to patch other (non-platform)"
-                            f" extensions"
-                        )
-                    base_from = f'extension "{ext_name}"'
-
-                logger.info(
-                    'Patch: %s is patching "%s" from %s', context, base_name, base_from
-                )
+                    logger.info(
+                        'Extension "%s" is patching "%s" from extension "%s"',
+                        patch["extension"],
+                        patch_name,
+                        base["extension"],
+                    )
+                else:
+                    logger.info(
+                        'Extension "%s" is patching "%s" from base schema',
+                        patch["extension"],
+                        base_name,
+                    )
 
                 self._merge_profiles(base, patch)
                 self._merge_attributes(
@@ -1834,10 +1581,35 @@ class SchemaCompiler:
                 put_non_none(base, "associations", patch.get("associations"))
                 self._patch_constraints(base, patch)
 
-                if self.browser_mode:
-                    patched_by = j_array(base.setdefault("_patched_by_extensions", []))
-                    patched_by.append(j_string(patch["extension"]))
-                    patched_by.sort(key=lambda v: j_string(v))
+                self._patched_by_annotations(base, patch)
+
+    @staticmethod
+    def _patch_constraints(base: JObject, patch: JObject) -> None:
+        if "constraints" in patch:
+            constraints = patch["constraints"]
+            if constraints:
+                base["constraints"] = constraints
+            else:
+                # Remove base constraints if patch explicitly defines an empty
+                # constraints list
+                del base["constraints"]
+
+    def _patched_by_annotations(self, base: JObject, patch: JObject) -> None:
+        """
+        Appends extension and extension_id from patch into patched_by_extensions and
+        patched_by_extension_ids lists in base.
+        """
+        if self.legacy_mode:
+            # Legacy mode does not add this
+            return
+
+        ext_names = j_array(base.setdefault("patched_by_extensions", []))
+        ext_names.append(j_string(patch["extension"]))
+        ext_names.sort(key=lambda v: j_string(v))
+
+        ext_ids = j_array(base.setdefault("patched_by_extension_ids", []))
+        ext_ids.append(j_integer(patch["extension_id"]))
+        ext_ids.sort(key=lambda v: j_integer(v))
 
     def _merge_attributes(
         self, dest_attributes: JObject, source_attributes: JObject, context: str
@@ -1950,17 +1722,6 @@ class SchemaCompiler:
         if merged:  # avoid adding "profiles" if neither base nor patch had any
             # sorts and converts to list (otherwise profiles are randomly sorted)
             dest["profiles"] = sorted(merged, key=lambda v: j_string(v))
-
-    @staticmethod
-    def _patch_constraints(base: JObject, patch: JObject) -> None:
-        if "constraints" in patch:
-            constraints = patch["constraints"]
-            if constraints:
-                base["constraints"] = constraints
-            else:
-                # Remove base constraints if patch explicitly defines an empty
-                # constraints list
-                del base["constraints"]
 
     def _resolve_extends(self, items: JObject, kind: str) -> None:
         for item_name, item in items.items():
@@ -2136,28 +1897,14 @@ class SchemaCompiler:
                         )
                     )
                 if "type_name" not in type_detail:
-                    if (
-                        self._version == "1.0.0-rc.2"
-                        and type_detail.get("extension") == "splunk"
-                    ):
-                        self._warning(
-                            'Ignoring know issue with extension "splunk":'
-                            ' dictionary type "%s" defines "type" without "type_name";'
-                            " both are required to define a dictionary subtype"
-                            '\n\n    PLEASE FIX by defining "type_name" in dictionary'
-                            ' type "%s"\n',
+                    raise SchemaException(
+                        self._dictionary_type_error_message(
                             type_name,
-                            type_name,
+                            type_detail,
+                            'defines "type" without "type_name"; both are required'
+                            " to define a dictionary subtype",
                         )
-                    else:
-                        raise SchemaException(
-                            self._dictionary_type_error_message(
-                                type_name,
-                                type_detail,
-                                'defines "type" without "type_name"; both are required'
-                                " to define a dictionary subtype",
-                            )
-                        )
+                    )
             if "type_name" in type_detail and "type" not in type_detail:
                 if self._version == "1.0.0-rc.2":
                     # 1.0.0-rc.2 left out "type" for some subtypes. The legacy compiler
@@ -2248,11 +1995,13 @@ class SchemaCompiler:
 
     def _add_datetime_sibling_dictionary_attributes(self) -> None:
         """
-        When "datetime" profile and "datetime_t" dictionary type are both define,
-        add magic datetime dictionary attributes as siblings to dictionary attributes
-        with type "timestamp_t".
+        Magic datetime dictionary attribute siblings with type "timestamp_t" are added
+        when the following are defined in the schema:
+            - The "datetime" profile
+            - The "datetime_t" dictionary type
+            - The "timestamp_t" dictionary type
         """
-        got_datetime_profile = "datetime" in self._base_profiles
+        got_datetime_profile = "datetime" in self._profiles
         dictionary_types = j_object(self._dictionary.setdefault("types", {}))
         dictionary_types_attributes = j_object(
             dictionary_types.setdefault("attributes", {})
@@ -2270,7 +2019,7 @@ class SchemaCompiler:
             dictionary_attributes = j_object(
                 self._dictionary.setdefault("attributes", {})
             )
-            # We can't add dictionary_attributes while iterator, so instead add to
+            # We can't add dictionary_attributes while iterating, so instead add to
             # another dict and then merge
             additions: JObject = {}
             for attribute_name, attribute in dictionary_attributes.items():
@@ -2298,7 +2047,7 @@ class SchemaCompiler:
         else:
             logger.info(
                 'This schema does not define the "datetime" profile or the "datetime_t"'
-                " dictionary type, so datetime siblings of timestamp_t attributes"
+                ' dictionary type, so datetime siblings of "timestamp_t" attributes'
                 " will not be added."
             )
 
@@ -2354,27 +2103,15 @@ class SchemaCompiler:
             if "profiles" in item:
                 for profile_name in j_array(item["profiles"]):
                     profile_name = j_string(profile_name)
-                    if "/" in profile_name:
-                        if profile_name in self._extension_profiles:
-                            profile = j_object(self._extension_profiles[profile_name])
-                        else:
-                            if "extension" in item:
-                                full_group = f'extension "{item["extension"]}" {group}'
-                            else:
-                                full_group = group
-                            raise SchemaException(
-                                f'Undefined extension profile "{profile_name}" used in'
-                                f' {full_group} "{item_name}"'
-                            )
-                    elif profile_name in self._base_profiles:
-                        profile = j_object(self._base_profiles[profile_name])
+                    if profile_name in self._profiles:
+                        profile = j_object(self._profiles[profile_name])
                     else:
                         if "extension" in item:
                             full_group = f'extension "{item["extension"]}" {group}'
                         else:
                             full_group = group
                         raise SchemaException(
-                            f'Undefined base schema profile "{profile_name}" used in'
+                            f'Undefined profile "{profile_name}" used in'
                             f' {full_group} "{item_name}"'
                         )
 
@@ -2479,7 +2216,7 @@ class SchemaCompiler:
                         # information, so we need to do extra work to determine actual
                         # type
                         object_type = self._find_object_type(
-                            attribute_name, j_object(attribute)
+                            item, attribute_name, j_object(attribute)
                         )
                         if object_type:
                             self._gather_profiles(object_type, profiles_dict)
@@ -2551,7 +2288,7 @@ class SchemaCompiler:
         obj_attributes = j_object(obj.setdefault("attributes", {}))
         for attr_name, attr in obj_attributes.items():
             try:
-                object_type = self._find_object_type(attr_name, j_object(attr))
+                object_type = self._find_object_type(obj, attr_name, j_object(attr))
             except SchemaException as e:
                 raise SchemaException(
                     f'Error finding type of attribute "{attr_name}"'
@@ -2560,7 +2297,9 @@ class SchemaCompiler:
             if object_type:
                 self._gather_profiles(object_type, profiles_dict)
 
-    def _find_object_type(self, attribute_name: str, attribute: JObject) -> str | None:
+    def _find_object_type(
+        self, item: JObject, attribute_name: str, attribute: JObject
+    ) -> str | None:
         """
         Determine object type of unprocessed object or class attribute
         (an attribute not yet merged with dictionary attribute information).
@@ -2574,13 +2313,14 @@ class SchemaCompiler:
             f'Object attribute "{attribute_name}" unexpectedly already has'
             ' "object_type"'
         )
-
-        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
-        if attribute_name not in dictionary_attributes:
+        dictionary_attribute = self._get_dictionary_attribute(
+            item, attribute_name, attribute
+        )
+        if dictionary_attribute is None:
             raise SchemaException(
                 f'Attribute "{attribute_name}" is not a defined dictionary attribute'
             )
-        dictionary_attribute = j_object(dictionary_attributes[attribute_name])
+
         # will return None if "object_type" is not present
         return j_string_optional(dictionary_attribute.get("object_type"))
 
@@ -2593,15 +2333,15 @@ class SchemaCompiler:
     def _verify_item_attributes_and_add_datetime(
         self, items: JObject, kind: str
     ) -> None:
-        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         dictionary_types = j_object(self._dictionary.setdefault("types", {}))
         dictionary_types_attributes = j_object(
             dictionary_types.setdefault("attributes", {})
         )
 
-        got_datetime_profile = "datetime" in self._base_profiles
+        got_datetime_profile = "datetime" in self._profiles
         got_datetime_t = "datetime_t" in dictionary_types_attributes
-        add_datetime = got_datetime_profile and got_datetime_t
+        got_timestamp_t = "timestamp_t" in dictionary_types_attributes
+        add_datetime = got_datetime_profile and got_datetime_t and got_timestamp_t
 
         for item_name, item in items.items():
             item = j_object(item)
@@ -2610,10 +2350,10 @@ class SchemaCompiler:
             attributes = j_object(item.setdefault("attributes", {}))
             for attribute_name, attribute in attributes.items():
                 attribute = j_object(attribute)
-                dictionary_attribute = j_object(
-                    dictionary_attributes.get(attribute_name, {})
+                dictionary_attribute = self._get_dictionary_attribute(
+                    item, attribute_name, attribute
                 )
-                if "description" not in attribute:
+                if dictionary_attribute and "description" not in attribute:
                     # No description. Make sure fallback dictionary description isn't
                     # meant to be overridden.
                     dictionary_description = j_string(
@@ -2630,11 +2370,12 @@ class SchemaCompiler:
                         )
 
                 if add_datetime:
+                    attribute_type: str | None = None
                     if "type" in attribute:
-                        attribute_type = attribute["type"]
-                    else:
-                        attribute_type = dictionary_attribute.get("type")
-                    if attribute_type == "timestamp_t":
+                        attribute_type = j_string(attribute["type"])
+                    elif dictionary_attribute:
+                        attribute_type = j_string(dictionary_attribute.get("type"))
+                    if attribute_type and attribute_type == "timestamp_t":
                         dt_attribute = deep_copy_j_object(attribute)
                         if self.legacy_mode:
                             dt_attribute["profile"] = "datetime"
@@ -2658,10 +2399,7 @@ class SchemaCompiler:
         # have a "requirement"
         missing_requirements: list[str] = []
         self._ensure_item_attributes_have_requirement(
-            self._base_profiles, "profile", missing_requirements
-        )
-        self._ensure_item_attributes_have_requirement(
-            self._extension_profiles, "profile", missing_requirements
+            self._profiles, "profile", missing_requirements
         )
         self._ensure_item_attributes_have_requirement(
             self._classes, "class", missing_requirements
@@ -2708,15 +2446,7 @@ class SchemaCompiler:
         if self.browser_mode:
             # Do "annotations" processing so profile attributes match work done when
             # including profiles
-            for item in self._base_profiles.values():
-                item = j_object(item)
-                if "annotations" in item and "attributes" in item:
-                    annotations = j_object(item["annotations"])
-                    item_attributes = j_object(item["attributes"])
-                    for attribute in item_attributes.values():
-                        attribute = j_object(attribute)
-                        self._add_attribute_annotations(annotations, attribute)
-            for item in self._extension_profiles.values():
+            for item in self._profiles.values():
                 item = j_object(item)
                 if "annotations" in item and "attributes" in item:
                     annotations = j_object(item["annotations"])
@@ -2725,14 +2455,9 @@ class SchemaCompiler:
                         attribute = j_object(attribute)
                         self._add_attribute_annotations(annotations, attribute)
             # Finish the attributes, enriching with dictionary attribute information
-            self._finish_item_attributes(self._base_profiles, "profile")
-            self._finish_item_attributes(self._extension_profiles, "profile")
+            self._finish_item_attributes(self._profiles, "profile")
         else:
-            for profile in self._base_profiles.values():
-                profile = j_object(profile)
-                if "attributes" in profile:
-                    del profile["attributes"]
-            for profile in self._extension_profiles.values():
+            for profile in self._profiles.values():
                 profile = j_object(profile)
                 if "attributes" in profile:
                     del profile["attributes"]
@@ -2750,6 +2475,7 @@ class SchemaCompiler:
             for attribute_name, attribute in attributes.items():
                 new_attribute = self._finish_item_attribute(
                     item_name,
+                    item,
                     kind,
                     attribute_name,
                     j_object(attribute),
@@ -2764,25 +2490,26 @@ class SchemaCompiler:
     def _finish_item_attribute(
         self,
         item_name: str,
+        item: JObject,
         kind: str,
         attribute_name: str,
         attribute: JObject,
         dictionary_attributes: JObject,
         dictionary_types_attributes: JObject,
     ) -> JObject:
-        # TODO: Attribute that is not defined in dictionary attributes should never
-        #       happen at this point, but does today due to the flawed splunk/splunk
-        #       profile in the "splunk" extension. Once fixed, this check and the
-        #       the logic after the return can be removed and the assert at the end of
-        #       this function can be moved to the top.
-        if attribute_name in dictionary_attributes:
-            dict_attribute = j_object(dictionary_attributes[attribute_name])
+        # TODO: scoped - class and obj "name" fields are not scoped
+        #       both in old compiler and here. Should they they be by default?
+        #       Side effects? Used anywhere? Schema browser?
+
+        dict_attribute = self._get_dictionary_attribute(item, attribute_name, attribute)
+        if dict_attribute:
             new_attribute = deep_copy_j_object(dict_attribute)
             deep_merge(new_attribute, attribute)
 
             # Check if the item attribute's type has been changed, because if so,
             # we need make sure the type_name ends up with the correct value.
             if "type" in attribute:
+                # TODO: scoped - scope dictionary types (by default)?
                 attribute_type = attribute["type"]
                 if attribute_type != dict_attribute["type"]:
                     # This item attribute's type has been changed.
@@ -2807,9 +2534,21 @@ class SchemaCompiler:
                     if subtype != original_type:
                         raise SchemaException(
                             f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                            f' refined type "{attribute_type}", however this type is'
-                            f' not a subtype of the original "{original_type}"'
+                            f' refined type "{attribute_type}", however this is'
+                            f" not a subtype of dictionary attribute type"
+                            f' "{original_type}"'
                         )
+
+                    if attribute.get("is_array") != dict_attribute.get("is_array"):
+                        raise SchemaException(
+                            f'Attribute "{attribute_name}" in {kind} "{item_name}" '
+                            f' "is_array" value {attribute.get("is_array")} does not'
+                            f" match dictionary attribute value of "
+                            f" {dict_attribute.get('is_array')}"
+                        )
+
+                    # TODO: could also check other type constraints
+
                     # Checks are OK... we just need to fix up "type_name", which
                     # currently has the type from the dictionary type
                     new_attribute["type_name"] = dict_type["caption"]
@@ -2824,28 +2563,11 @@ class SchemaCompiler:
 
             return new_attribute
 
-        # This is a known issue with the 1.0.0-rc.2 with "splunk" extension compilation,
-        # so we will log and ignore this specific case, and assert otherwise.
-        if (
-            item_name == "splunk/splunk"
-            and "splunk" in self._extensions
-            and self._version == "1.0.0-rc.2"
-        ):
-            logger.debug(
-                '_finish_item_attribute - ignoring know issue with extension "splunk":'
-                ' attribute "%s" in %s "%s" is not a defined dictionary attribute',
-                attribute_name,
-                kind,
-                item_name,
-            )
-        else:
-            assert attribute_name in dictionary_attributes, (
-                f'Attribute "{attribute_name}" in {kind} "{item_name}" is not a defined'
-                f" dictionary attribute; this should have been caught earlier in the"
-                f" compile process"
-            )
-
-        return attribute
+        raise SchemaException(
+            f'LOGIC BUG: Attribute "{attribute_name}" in {kind} "{item_name}" is not a'
+            f" defined dictionary attribute; this should have been caught earlier in"
+            f" the compile process"
+        )
 
     @staticmethod
     def _add_sibling_of_to_attributes(attributes: JObject) -> None:
@@ -2876,20 +2598,86 @@ class SchemaCompiler:
                 # related enum attribute.
                 attribute["_sibling_of"] = sibling_of_dict[attribute_name]
 
+    def _check_shadowed_name(
+        self,
+        extension_name: str,
+        kind: str,
+        ext_item_unscoped_name: str,
+        base_items: JObject,
+    ) -> None:
+        if "/" in ext_item_unscoped_name:
+            raise SchemaException(
+                f'Illegal use of extension-scope in extension "{extension_name}"'
+                f' {kind} "{ext_item_unscoped_name}"'
+            )
+
+        if ext_item_unscoped_name not in base_items:
+            return
+
+        base_item = j_object(base_items[ext_item_unscoped_name])
+        if "extension" in base_item:
+            raise SchemaException(
+                f'LOGIC BUG: base {kind} with unscoped name "{ext_item_unscoped_name}"'
+                ' unexpectedly has "extension" field'
+            )
+        if self.allow_shadowing:
+            self._warning(
+                'Extension "%s" %s "%s" shadows base %s',
+                extension_name,
+                kind,
+                ext_item_unscoped_name,
+                kind,
+            )
+        else:
+            raise SchemaException(
+                f'Extension "{extension_name}" {kind} "{ext_item_unscoped_name}"'
+                f" shadows base {kind}."
+                " This should be fixed if this is a new extension."
+                " For an extension in active use, fixing can lead to backwards"
+                " incompatibility."
+                " Use the -a, --allow-shadowing option to enable shadowing."
+            )
+
+    def _get_dictionary_attribute(
+        self, item: JObject, attribute_name: str, attribute: JObject
+    ) -> JObject | None:
+        """
+        Dictionary attributes are used without extension-scope in classes, objects,
+        and profiles. This returns the correct dictionary attribute whether or not it
+        is being used from an extension context.
+        """
+        dictionary_attributes = j_object(self._dictionary.get("attributes", {}))
+        if "extension" in attribute:
+            # Special-case. This occurs with attributes from patched items that are
+            # defined in the extension that patched the item.
+            ext_name = j_string(attribute["extension"])
+            scoped_name = to_extension_scoped_name(ext_name, attribute_name)
+            # No need to fall back in this case... the item should exist
+            if scoped_name not in dictionary_attributes:
+                raise SchemaException(
+                    f'Attribute "{scoped_name}" from "#{item.get("name", "")}"'
+                    f' patched by extension "{ext_name}"'
+                    " is not a defined dictionary attribute"
+                )
+            return j_object(dictionary_attributes[scoped_name])
+
+        # TODO: scoped - should as annotate all extension item attributes so they work
+        #       like the patch attribute case?
+        if "extension" in item:
+            ext_name = j_string(item["extension"])
+            scoped_name = to_extension_scoped_name(ext_name, attribute_name)
+            if scoped_name in dictionary_attributes:
+                return j_object(dictionary_attributes[scoped_name])
+        # Fall-back to unscoped name
+        return j_object_optional(dictionary_attributes.get(attribute_name))
+
     def _create_compile_output(self) -> JObject:
         if self.legacy_mode:
-            if self.scope_extension_keys:
-                classes = add_extension_scope_to_items(self._classes, self._objects)
-                objects = add_extension_scope_to_items(self._objects, self._objects)
-                add_extension_scope_to_dictionary(self._dictionary, self._objects)
-            else:
-                classes = self._classes
-                objects = self._objects
             dictionary_types = j_object(self._dictionary.get("types", {}))
             return {
-                "base_event": classes.get("base_event"),
-                "classes": classes,
-                "objects": objects,
+                "base_event": self._classes.get("base_event"),
+                "classes": self._classes,
+                "objects": self._objects,
                 "dictionary_attributes": self._dictionary.get("attributes"),
                 "types": dictionary_types.get("attributes"),
                 "version": self._version,
@@ -2900,13 +2688,122 @@ class SchemaCompiler:
             "dictionary": self._dictionary,
             "classes": self._classes,
             "objects": self._objects,
-            "profiles": self._base_profiles | self._extension_profiles,
+            "profiles": self._profiles,
             "extensions": self._extensions,
             "version": self._version,
             "compile_version": 1,
         }
+
         if self.browser_mode:
             output["browser_mode?"] = True
             output["all_classes"] = self._all_classes
             output["all_objects"] = self._all_objects
         return output
+
+
+@dataclass
+class Extension:
+    base_path: Path
+    uid: int
+    name: str
+    is_platform_extension: bool
+    caption: str | None
+    description: str | None
+    version: str
+    categories: JObject
+    classes: JObject
+    class_patches: JObject
+    objects: JObject
+    object_patches: JObject
+    dictionary: JObject
+    profiles: JObject
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Extension):
+            return (
+                self.is_platform_extension == other.is_platform_extension
+                and self.uid == other.uid
+            )
+        return False
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Extension):
+            return False
+        if self.is_platform_extension and other.is_platform_extension:
+            return self.uid < other.uid
+        if self.is_platform_extension and not other.is_platform_extension:
+            return True
+        if not self.is_platform_extension and other.is_platform_extension:
+            return False
+        return self.uid < other.uid
+
+    def _annotate_object(self, o: JObject) -> None:
+        """Annotate o adding extension and extension_id fields for this extension."""
+        o["extension"] = self.name
+        o["extension_id"] = self.uid
+
+    def _annotate_object_children(self, o: JObject) -> None:
+        """
+        Annotate children of o (o's values) adding extension and extension_id fields
+        for this extension.
+        """
+        for child in o.values():
+            self._annotate_object(j_object(child))
+
+    def _annotate_patches(self, patches: JObject) -> None:
+        """
+        Annotate patches. This is similar to _enrich_object_children, but also annotates
+        attributes of the the patched items (classes and objects) that are defined in
+        this extension.
+
+        This is needed because patched items are not defined in this extension, so
+        when the patched class or object attribute details are enriched with
+        dictionary attribute information, we cannot use where these class or object
+        is defined (base schema or other extension) to determine whether the
+        attribute is from an extension or from the base schema. That is, whether
+        we need to look it up with an extension prefix or not.
+        """
+        dictionary_attributes = j_object(self.dictionary.get("attributes", {}))
+        for patch in patches.values():
+            patch = j_object(patch)
+            self._annotate_object(patch)
+            attributes = j_object(patch.get("attributes", {}))
+            for attribute_name, attribute in attributes.items():
+                if attribute_name in dictionary_attributes:
+                    self._annotate_object(j_object(attribute))
+
+    def annotate(self) -> None:
+        """
+        Annotate all items in extension with extension information.
+        This must be done after processing includes.
+        """
+        category_attributes = j_object(self.categories.setdefault("attributes", {}))
+        for category_detail in category_attributes.values():
+            category_detail = j_object(category_detail)
+            category_detail["uid"] = extension_scoped_category_uid(
+                self.uid, j_integer(category_detail["uid"])
+            )
+            self._annotate_object(category_detail)
+        self._annotate_object_children(self.classes)
+        self._annotate_patches(self.class_patches)
+        self._annotate_object_children(self.objects)
+        self._annotate_patches(self.object_patches)
+        self._annotate_object_children(
+            j_object(self.dictionary.setdefault("attributes", {}))
+        )
+        dictionary_types = j_object(self.dictionary.setdefault("types", {}))
+        dictionary_types_attributes = j_object(
+            dictionary_types.setdefault("attributes", {})
+        )
+        self._annotate_object_children(dictionary_types_attributes)
+        self._annotate_object_children(self.profiles)
+
+
+def _extension_j_value_key(v: JValue):
+    """
+    Helper key function to sort values of SchemaCompiler._extensions consistent
+    with Extension dataclass.
+    """
+    o = j_object(v)
+    return (not o["platform_extension?"], o["uid"])

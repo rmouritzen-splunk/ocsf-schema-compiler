@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
 # As with all Python type hints, these improve code readability and help IDEs identify
@@ -95,3 +97,39 @@ def j_integer(v: JValue) -> int:
         f"j_integer: expected integer number but got {json_type_from_value(v)}: {v}"
     )
     return v
+
+
+def deep_copy_j_object(obj: JObject) -> JObject:
+    """JObject typed flavor of copy.deepcopy. Returns deep copy of obj."""
+    return deepcopy(obj)
+
+
+def deep_copy_j_array(array: JArray) -> JArray:
+    """JArray typed flavor of copy.deepcopy. Returns deep copy of array."""
+    return deepcopy(array)
+
+
+def deep_merge(dest: JObject, source: JObject) -> None:
+    """
+    In-place merge a source dictionary into a destination dictionary, modifying the
+    destination dictionary.
+
+    Note: this merge does not merge lists or deep merge dictionaries inside lists. List
+    values are simply overwritten.
+    """
+
+    for source_key, source_value in source.items():
+        if source_key in dest:
+            dest_value = dest[source_key]
+            if isinstance(dest_value, dict) and isinstance(source_value, dict):
+                deep_merge(dest_value, source_value)
+            else:
+                # This replaces dest[source_key] with source_value
+                dest[source_key] = source_value
+        else:
+            dest[source_key] = source_value
+
+
+def put_non_none(d: JObject, k: str, v: JValue) -> None:
+    if v is not None:
+        d[k] = v

@@ -1,0 +1,22 @@
+{
+  "caption": "Categories",
+  "description": "The OCSF categories for the Example extension.",
+  "name": "category",
+  "attributes": {
+    "video_games": {
+      "uid": 1,
+      "caption": "Video Games",
+      "description": "Video game events are a category from the alpha example extension."
+    },
+    "network": {
+      "uid": 2,
+      "caption": "Network Activity (Alpha Example Extension)",
+      "description": "Alpha example extension version of Network Activity events category."
+    },
+    "system": {
+      "uid": 3,
+      "caption": "System Activity (Alpha Example Extension)",
+      "description": "Alpha example extension version of System Activity events."
+    }
+  }
+}

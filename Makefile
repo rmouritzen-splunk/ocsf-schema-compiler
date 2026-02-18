@@ -6,6 +6,8 @@ tests:
 
 pip-update:
 	@./scripts/ensure-venv.sh
+	# Update Python
+	python3 -m venv --upgrade .venv
 	# Install or update all development time pip dependencies
 	python -m pip install -U basedpyright ruff flit
 

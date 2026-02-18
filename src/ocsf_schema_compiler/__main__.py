@@ -42,6 +42,14 @@ def main():
         help="optional path to a directory containing one or more OCSF schema"
         " extensions; can be repeated",
     )
+    _ = parser.add_argument(
+        "-a",
+        "--allow-shadowing",
+        action="store_true",
+        default=False,
+        help="allow names in extensions to shadow base extension names;"
+        " default: %(default)s",
+    )
     group = parser.add_mutually_exclusive_group()
     _ = group.add_argument(
         "-b",
@@ -60,14 +68,6 @@ def main():
         " -b, --browser-mode option; default: %(default)s",
     )
     _ = parser.add_argument(
-        "-s",
-        "--scope-extension-keys",
-        action="store_true",
-        default=False,
-        help="scope extension keys; can only be used with the -l, --legacy-mode option;"
-        " default: %(default)s",
-    )
-    _ = parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default="INFO",
@@ -81,8 +81,6 @@ def main():
     )
 
     args = parser.parse_args()
-    if args.scope_extension_keys and not args.legacy_mode:  # pyright: ignore[reportAny]
-        parser.error("-s, --scope-extension-keys requires -l, --legacy-mode")
 
     logging.basicConfig(
         format="%(levelname)s: %(message)s",
@@ -97,9 +95,9 @@ def main():
         args.path,  # pyright: ignore[reportAny]
         args.ignore_platform_extensions,  # pyright: ignore[reportAny]
         args.extensions_paths,  # pyright: ignore[reportAny]
+        args.allow_shadowing,  # pyright: ignore[reportAny]
         args.browser_mode,  # pyright: ignore[reportAny]
         args.legacy_mode,  # pyright: ignore[reportAny]
-        args.scope_extension_keys,  # pyright: ignore[reportAny]
     )
     output = compiler.compile()
 

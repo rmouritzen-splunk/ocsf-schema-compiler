@@ -1,0 +1,12 @@
+{
+  "caption": "Categories",
+  "description": "The OCSF categories for the beta example extension.",
+  "name": "category",
+  "attributes": {
+    "home_automation": {
+      "uid": 1,
+      "caption": "Home Automation",
+      "description": "Home automation events are a category from the beta example extension."
+    }
+  }
+}

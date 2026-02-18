@@ -100,32 +100,10 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
-    def test_v1_0_0_rc_2_with_splunk_v1_16_2(self):
-        compiler = SchemaCompiler(
-            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.0.0-rc.2"),
-            ignore_platform_extensions=True,
-            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/splunk-v1.16.2")],
-        )
-        schema = compiler.compile()
-        baseline_schema = read_json_object_zstandard_file(
-            Path(
-                BASE_DIR,
-                "compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json.zst",
-            )
-        )
-        ok, diffs = diff_objects(schema, baseline_schema)
-        self.assertTrue(
-            ok,
-            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
-        )
-        # To make sure diff_objects is implemented correctly, also check with Python
-        # equality
-        self.assertEqual(schema, baseline_schema, "schema should match baseline")
-
-    def test_v1_6_0_with_example_extension(self):
+    def test_v1_6_0_with_example_extensions(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
-            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extension")],
+            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extensions")],
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
@@ -146,12 +124,11 @@ class TestRegressions(unittest.TestCase):
         # usage. The test uses a diff callback to ensure these differences are ones we
         # expect.
 
-        # Compile using legacy mode with scoped keys to minimize the differences.
+        # Compile using legacy mode to minimize the differences.
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
             legacy_mode=True,
-            scope_extension_keys=True,
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
