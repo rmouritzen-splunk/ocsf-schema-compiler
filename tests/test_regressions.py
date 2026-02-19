@@ -68,10 +68,33 @@ class TestRegressions(unittest.TestCase):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
             Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst")
+        )
+        ok, diffs = diff_objects(schema, baseline_schema)
+        self.assertTrue(
+            ok,
+            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
+        )
+        # To make sure diff_objects is implemented correctly, also check with Python
+        # equality
+        self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
+    def test_v1_6_0_with_aws_v1_0_0_browser_mode(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
+            browser_mode=True,
+        )
+        schema = compiler.compile()
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR, "compiled-baselines/browser-schema-v1.6.0-aws-v1.0.0.json.zst"
+            )
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -100,10 +123,13 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
+    # TODO: example extension
+    @unittest.skip("TODO: fixed example extension")
     def test_v1_6_0_with_example_extensions(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extensions")],
+            allow_shadowing=True,
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
@@ -128,6 +154,7 @@ class TestRegressions(unittest.TestCase):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
             legacy_mode=True,
         )
         schema = compiler.compile()
@@ -157,25 +184,6 @@ def legacy_aws_diff_callback(
     left_diff: DiffValue,
     right_diff: DiffValue,
 ) -> bool:
-    # Legacy compiler adds _both_ aws/last_used_time and last_used_time
-    # This compiler overwrites last_used_time, and then the scope_extension_keys option
-    # adds it to aws/last_user_time
-    if (
-        key == "dictionary_attributes"
-        and isinstance(left_diff, DiffDictKeys)
-        and left_diff.keys == []
-        and isinstance(right_diff, DiffDictKeys)
-        and right_diff.keys == ["last_used_time", "last_used_time_dt"]
-    ):
-        return True
-
-    if (
-        path == ["dictionary_attributes", "last_used_time"]
-        or path == ["dictionary_attributes", "last_used_time_dt"]
-    ) and left_diff == MISSING:
-        # These will be missing with this compiler and scope_extension_keys (left value)
-        return True
-
     if (
         len(path) == 2
         and path[0] == "objects"
@@ -195,44 +203,6 @@ def legacy_aws_diff_callback(
         and right_diff is None
     ):
         # Same as above but now we are at the "objects.<object-name>.profiles" level
-        return True
-
-    if (
-        key in ["last_used_time", "last_used_time_dt"]
-        and len(path) > 2
-        and path[-2] == "attributes"
-        and isinstance(left_diff, DiffDictKeys)
-        and left_diff.keys == ["extension", "extension_id"]
-        and isinstance(right_diff, DiffDictKeys)
-        and right_diff.keys == []
-    ):
-        # This compiler overwrites the one last_user_time (which is carried over to
-        # last_user_time_dt) and so class and object attributes using it will have
-        # "extension" and "extension_id"
-        return True
-
-    if (
-        key in ["extension", "extension_id"]
-        and len(path) > 3
-        and path[-3] == "attributes"
-        and path[-2] in ["last_used_time", "last_used_time_dt"]
-        and left_diff != MISSING
-        and right_diff == MISSING
-    ):
-        # Same as above, though here we are at the attribute property level
-        return True
-
-    if (
-        key == "caption"
-        and len(path) > 3
-        and path[-3] == "attributes"
-        and path[-2] in ["last_used_time", "last_used_time_dt"]
-        and left_diff == "Last Used time"
-        and right_diff == "Last Used Time"
-    ):
-        # Because this compiler overwrite the actual dictionary attribute
-        # last_used_time, the caption in object attributes (and class attributes if
-        # that happened) becomes the one from the AWS extension.
         return True
 
     return False

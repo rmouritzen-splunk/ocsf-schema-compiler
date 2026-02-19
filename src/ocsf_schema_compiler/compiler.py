@@ -39,7 +39,7 @@ from ocsf_schema_compiler.structured_read import (
     read_structured_items,
     read_patchable_structured_items,
 )
-from ocsf_schema_compiler.utils import pretty_json_encode, quote_string
+from ocsf_schema_compiler.utils import pretty_json_encode
 
 
 logger = logging.getLogger(__name__)
@@ -1839,14 +1839,15 @@ class SchemaCompiler:
     ) -> None:
         if not self.browser_mode:
             return
-        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         item_attributes = j_object(item.setdefault("attributes", {}))
-        for item_attribute_name in item_attributes.keys():
-            if item_attribute_name in dictionary_attributes:
-                dictionary_attribute = j_object(
-                    dictionary_attributes[item_attribute_name]
-                )
+        for item_attribute_name, item_attribute in item_attributes.items():
+            dictionary_attribute = self._get_dictionary_attribute(
+                item,
+                item_attribute_name,
+                j_object(item_attribute),
+            )
 
+            if dictionary_attribute:
                 # Create copy of link to avoid polluting original in case at least one
                 # attribute is an object type.
                 attribute_link = deep_copy_j_object(link)
@@ -2463,7 +2464,6 @@ class SchemaCompiler:
                     del profile["attributes"]
 
     def _finish_item_attributes(self, items: JObject, kind: str) -> None:
-        dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         dictionary_types = j_object(self._dictionary.setdefault("types", {}))
         dictionary_types_attributes = j_object(
             dictionary_types.setdefault("attributes", {})
@@ -2479,7 +2479,6 @@ class SchemaCompiler:
                     kind,
                     attribute_name,
                     j_object(attribute),
-                    dictionary_attributes,
                     dictionary_types_attributes,
                 )
                 new_attributes[attribute_name] = new_attribute
@@ -2494,7 +2493,6 @@ class SchemaCompiler:
         kind: str,
         attribute_name: str,
         attribute: JObject,
-        dictionary_attributes: JObject,
         dictionary_types_attributes: JObject,
     ) -> JObject:
         # TODO: scoped - class and obj "name" fields are not scoped

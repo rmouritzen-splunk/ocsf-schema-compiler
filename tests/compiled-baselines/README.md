@@ -14,9 +14,11 @@ pip install -e .
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 | zstd > tests/compiled-baselines/schema-v1.6.0.json.zst
 
-ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -b | zstd > tests/compiled-baselines/browser-schema-v1.6.0.json.zst
+ocsf-schema-compiler --browser-mode tests/uncompiled-schemas/ocsf-schema-v1.6.0 | zstd > tests/compiled-baselines/browser-schema-v1.6.0.json.zst
 
-ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/aws-v1.0.0 | zstd > tests/compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst
+ocsf-schema-compiler --browser-mode tests/uncompiled-schemas/ocsf-schema-v1.6.0 --allow-shadowing -e tests/uncompiled-schemas/aws-v1.0.0 | zstd > tests/compiled-baselines/browser-schema-v1.6.0-aws-v1.0.0.json.zst
+
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 --allow-shadowing -e tests/uncompiled-schemas/aws-v1.0.0 | zstd > tests/compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.0.0-rc.2 -i | zstd > tests/compiled-baselines/schema-v1.0.0-rc.2.json.zst
 
