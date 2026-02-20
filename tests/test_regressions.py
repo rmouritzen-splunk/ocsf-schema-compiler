@@ -124,7 +124,10 @@ class TestRegressions(unittest.TestCase):
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
     # TODO: example extension
-    @unittest.skip("TODO: fixed example extension")
+    #       example-extensions should use new extension-scoping
+    #       another should use shadowed names
+    #       and another should use unscoped dictionary types (if scoped is supported)
+    @unittest.skip("TODO: fix example extension")
     def test_v1_6_0_with_example_extensions(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),

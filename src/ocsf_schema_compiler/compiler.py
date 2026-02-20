@@ -39,7 +39,7 @@ from ocsf_schema_compiler.structured_read import (
     read_structured_items,
     read_patchable_structured_items,
 )
-from ocsf_schema_compiler.utils import pretty_json_encode
+from ocsf_schema_compiler.utils import pretty_json_encode, quote_name_string
 
 
 logger = logging.getLogger(__name__)
@@ -1023,7 +1023,8 @@ class SchemaCompiler:
                     #       Also for now, this is a collision error
                     raise SchemaException(
                         f'Extension "{extension.name}" dictionary type'
-                        f' "{ext_type_name}" collides with base dictionary type'
+                        f' "{ext_type_name}" collides with base dictionary type;'
+                        " this is not supported as it would break compatibilityx"
                     )
 
                 # TODO: scoped - for now we are using unscoped dictionary types
@@ -1605,11 +1606,9 @@ class SchemaCompiler:
 
         ext_names = j_array(base.setdefault("patched_by_extensions", []))
         ext_names.append(j_string(patch["extension"]))
-        ext_names.sort(key=lambda v: j_string(v))
 
         ext_ids = j_array(base.setdefault("patched_by_extension_ids", []))
         ext_ids.append(j_integer(patch["extension_id"]))
-        ext_ids.sort(key=lambda v: j_integer(v))
 
     def _merge_attributes(
         self, dest_attributes: JObject, source_attributes: JObject, context: str
@@ -2495,7 +2494,7 @@ class SchemaCompiler:
         attribute: JObject,
         dictionary_types_attributes: JObject,
     ) -> JObject:
-        # TODO: scoped - class and obj "name" fields are not scoped
+        # TODO: scoped - class and obj "name" property fields are not scoped
         #       both in old compiler and here. Should they they be by default?
         #       Side effects? Used anywhere? Schema browser?
 
@@ -2653,9 +2652,9 @@ class SchemaCompiler:
             # No need to fall back in this case... the item should exist
             if scoped_name not in dictionary_attributes:
                 raise SchemaException(
-                    f'Attribute "{scoped_name}" from "#{item.get("name", "")}"'
-                    f' patched by extension "{ext_name}"'
-                    " is not a defined dictionary attribute"
+                    f'Attribute "{scoped_name}" from'
+                    f" {quote_name_string(j_string(item.get('name')))} patched by"
+                    f' extensions "{ext_name}" is not a defined dictionary attribute'
                 )
             return j_object(dictionary_attributes[scoped_name])
 
