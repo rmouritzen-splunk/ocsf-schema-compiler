@@ -33,13 +33,14 @@ from ocsf_schema_compiler.scoping import (
     category_scoped_class_uid,
     class_uid_scoped_type_uid,
     to_extension_scoped_name,
+    full_name,
 )
 from ocsf_schema_compiler.structured_read import (
     read_json_object_file,
     read_structured_items,
     read_patchable_structured_items,
 )
-from ocsf_schema_compiler.utils import pretty_json_encode, quote_name_string
+from ocsf_schema_compiler.utils import pretty_json_encode
 
 
 logger = logging.getLogger(__name__)
@@ -311,7 +312,6 @@ class SchemaCompiler:
 
         self._validate_extension_profiles(extensions)
 
-        # TODO: scoped - reexamine merging and overwriting with includes
         self._resolve_extension_includes(extensions)
 
         for extension in extensions:
@@ -1846,23 +1846,17 @@ class SchemaCompiler:
                 j_object(item_attribute),
             )
 
-            if dictionary_attribute:
-                # Create copy of link to avoid polluting original in case at least one
-                # attribute is an object type.
-                attribute_link = deep_copy_j_object(link)
-                # attribute_keys is only used to track the different attribute name uses
-                # of object types. We don't track the various attribute names that use
-                # dictionary types.
-                if "object_type" in dictionary_attribute:
-                    attribute_link["attribute_keys"] = [item_attribute_name]
-                links = j_array(dictionary_attribute.setdefault("_links", []))
-                links.append(attribute_link)
-                self._sort_links(links)
-            else:
-                raise SchemaException(
-                    f'{kind} "{item_name}" uses undefined attribute'
-                    f' "{item_attribute_name}"'
-                )
+            # Create copy of link to avoid polluting original in case at least one
+            # attribute is an object type.
+            attribute_link = deep_copy_j_object(link)
+            # attribute_keys is only used to track the different attribute name uses
+            # of object types. We don't track the various attribute names that use
+            # dictionary types.
+            if "object_type" in dictionary_attribute:
+                attribute_link["attribute_keys"] = [item_attribute_name]
+            links = j_array(dictionary_attribute.setdefault("_links", []))
+            links.append(attribute_link)
+            self._sort_links(links)
 
     def _enrich_and_validate_dictionary_types(self) -> None:
         dictionary_types = j_object(self._dictionary.setdefault("types", {}))
@@ -2316,11 +2310,6 @@ class SchemaCompiler:
         dictionary_attribute = self._get_dictionary_attribute(
             item, attribute_name, attribute
         )
-        if dictionary_attribute is None:
-            raise SchemaException(
-                f'Attribute "{attribute_name}" is not a defined dictionary attribute'
-            )
-
         # will return None if "object_type" is not present
         return j_string_optional(dictionary_attribute.get("object_type"))
 
@@ -2353,7 +2342,7 @@ class SchemaCompiler:
                 dictionary_attribute = self._get_dictionary_attribute(
                     item, attribute_name, attribute
                 )
-                if dictionary_attribute and "description" not in attribute:
+                if "description" not in attribute:
                     # No description. Make sure fallback dictionary description isn't
                     # meant to be overridden.
                     dictionary_description = j_string(
@@ -2499,72 +2488,65 @@ class SchemaCompiler:
         #       Side effects? Used anywhere? Schema browser?
 
         dict_attribute = self._get_dictionary_attribute(item, attribute_name, attribute)
-        if dict_attribute:
-            new_attribute = deep_copy_j_object(dict_attribute)
-            deep_merge(new_attribute, attribute)
+        new_attribute = deep_copy_j_object(dict_attribute)
+        deep_merge(new_attribute, attribute)
 
-            # Check if the item attribute's type has been changed, because if so,
-            # we need make sure the type_name ends up with the correct value.
-            if "type" in attribute:
-                # TODO: scoped - scope dictionary types (by default)?
-                attribute_type = attribute["type"]
-                if attribute_type != dict_attribute["type"]:
-                    # This item attribute's type has been changed.
-                    # We only allow a compatible subtype in this case.
-                    # In general, a subtype could be a dictionary subtype or an object
-                    # that inherits from a parent object (a derived object).
-                    # Currently this compiler only supports dictionary subtypes, not
-                    # object subtypes, though object subtypes are possible.
-                    if attribute_type not in dictionary_types_attributes:
-                        raise SchemaException(
-                            f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                            f' refined type "{attribute_type}", however the base type'
-                            f" is not a defined dictionary type. Note: refining object"
-                            f" types is not supported, though possible; file an issue"
-                            f" if this is needed."
-                        )
-                    # Make sure subtype of this attribute matches the original
-                    # attribute's type
-                    original_type = dict_attribute["type"]
-                    dict_type = j_object(dictionary_types_attributes[attribute_type])
-                    subtype = dict_type["type"]
-                    if subtype != original_type:
-                        raise SchemaException(
-                            f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                            f' refined type "{attribute_type}", however this is'
-                            f" not a subtype of dictionary attribute type"
-                            f' "{original_type}"'
-                        )
-
-                    if attribute.get("is_array") != dict_attribute.get("is_array"):
-                        raise SchemaException(
-                            f'Attribute "{attribute_name}" in {kind} "{item_name}" '
-                            f' "is_array" value {attribute.get("is_array")} does not'
-                            f" match dictionary attribute value of "
-                            f" {dict_attribute.get('is_array')}"
-                        )
-
-                    # TODO: could also check other type constraints
-
-                    # Checks are OK... we just need to fix up "type_name", which
-                    # currently has the type from the dictionary type
-                    new_attribute["type_name"] = dict_type["caption"]
-                    logger.debug(
-                        '_finish_item_attribute - attribute "%s" in %s "%s" is using'
-                        ' refined type "%s"',
-                        attribute_name,
-                        kind,
-                        item_name,
-                        attribute_type,
+        # Check if the item attribute's type has been changed, because if so,
+        # we need make sure the type_name ends up with the correct value.
+        if "type" in attribute:
+            # TODO: scoped - scope dictionary types (by default)?
+            attribute_type = attribute["type"]
+            if attribute_type != dict_attribute["type"]:
+                # This item attribute's type has been changed.
+                # We only allow a compatible subtype in this case.
+                # In general, a subtype could be a dictionary subtype or an object
+                # that inherits from a parent object (a derived object).
+                # Currently this compiler only supports dictionary subtypes, not
+                # object subtypes, though object subtypes are possible.
+                if attribute_type not in dictionary_types_attributes:
+                    raise SchemaException(
+                        f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
+                        f' refined type "{attribute_type}", however the base type'
+                        f" is not a defined dictionary type. Note: refining object"
+                        f" types is not supported, though possible; file an issue"
+                        f" if this is needed."
+                    )
+                # Make sure subtype of this attribute matches the original
+                # attribute's type
+                original_type = dict_attribute["type"]
+                dict_type = j_object(dictionary_types_attributes[attribute_type])
+                subtype = dict_type["type"]
+                if subtype != original_type:
+                    raise SchemaException(
+                        f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
+                        f' refined type "{attribute_type}", however this is'
+                        f" not a subtype of dictionary attribute type"
+                        f' "{original_type}"'
                     )
 
-            return new_attribute
+                if attribute.get("is_array") != dict_attribute.get("is_array"):
+                    raise SchemaException(
+                        f'Attribute "{attribute_name}" in {kind} "{item_name}" '
+                        f' "is_array" value {attribute.get("is_array")} does not'
+                        f" match dictionary attribute value of "
+                        f" {dict_attribute.get('is_array')}"
+                    )
 
-        raise SchemaException(
-            f'LOGIC BUG: Attribute "{attribute_name}" in {kind} "{item_name}" is not a'
-            f" defined dictionary attribute; this should have been caught earlier in"
-            f" the compile process"
-        )
+                # TODO: could also check other type constraints
+
+                # Checks are OK... we just need to fix up "type_name", which
+                # currently has the type from the dictionary type
+                new_attribute["type_name"] = dict_type["caption"]
+                logger.debug(
+                    '_finish_item_attribute - attribute "%s" in %s "%s" is using'
+                    ' refined type "%s"',
+                    attribute_name,
+                    kind,
+                    item_name,
+                    attribute_type,
+                )
+
+        return new_attribute
 
     @staticmethod
     def _add_sibling_of_to_attributes(attributes: JObject) -> None:
@@ -2637,7 +2619,7 @@ class SchemaCompiler:
 
     def _get_dictionary_attribute(
         self, item: JObject, attribute_name: str, attribute: JObject
-    ) -> JObject | None:
+    ) -> JObject:
         """
         Dictionary attributes are used without extension-scope in classes, objects,
         and profiles. This returns the correct dictionary attribute whether or not it
@@ -2652,21 +2634,17 @@ class SchemaCompiler:
             # No need to fall back in this case... the item should exist
             if scoped_name not in dictionary_attributes:
                 raise SchemaException(
-                    f'Attribute "{scoped_name}" from'
-                    f" {quote_name_string(j_string(item.get('name')))} patched by"
-                    f' extensions "{ext_name}" is not a defined dictionary attribute'
+                    f'Attribute "{scoped_name}" from "{full_name(item)}"'
+                    " is not a defined dictionary attribute"
                 )
             return j_object(dictionary_attributes[scoped_name])
 
-        # TODO: scoped - should as annotate all extension item attributes so they work
-        #       like the patch attribute case?
-        if "extension" in item:
-            ext_name = j_string(item["extension"])
-            scoped_name = to_extension_scoped_name(ext_name, attribute_name)
-            if scoped_name in dictionary_attributes:
-                return j_object(dictionary_attributes[scoped_name])
-        # Fall-back to unscoped name
-        return j_object_optional(dictionary_attributes.get(attribute_name))
+        if attribute_name not in dictionary_attributes:
+            raise SchemaException(
+                f'Attribute "{attribute_name}" from "{full_name(item)}"'
+                " is not a defined dictionary attribute"
+            )
+        return j_object(dictionary_attributes[attribute_name])
 
     def _create_compile_output(self) -> JObject:
         if self.legacy_mode:
@@ -2748,6 +2726,19 @@ class Extension:
         for child in o.values():
             self._annotate_object(j_object(child))
 
+    def _annotate_item_with_attributes(self, o: JObject) -> None:
+        """
+        Annotate class, object, or profile, and their attributes.
+        """
+        dictionary_attributes = j_object(self.dictionary.get("attributes", {}))
+        for item in o.values():
+            item = j_object(item)
+            self._annotate_object(j_object(item))
+            attributes = j_object(item.get("attributes", {}))
+            for attribute_name, attribute in attributes.items():
+                if attribute_name in dictionary_attributes:
+                    self._annotate_object(j_object(attribute))
+
     def _annotate_patches(self, patches: JObject) -> None:
         """
         Annotate patches. This is similar to _enrich_object_children, but also annotates
@@ -2782,9 +2773,15 @@ class Extension:
                 self.uid, j_integer(category_detail["uid"])
             )
             self._annotate_object(category_detail)
-        self._annotate_object_children(self.classes)
+
+        # self._annotate_object_children(self.classes)
+        self._annotate_item_with_attributes(self.classes)
+
         self._annotate_patches(self.class_patches)
-        self._annotate_object_children(self.objects)
+
+        # self._annotate_object_children(self.objects)
+        self._annotate_item_with_attributes(self.objects)
+
         self._annotate_patches(self.object_patches)
         self._annotate_object_children(
             j_object(self.dictionary.setdefault("attributes", {}))
@@ -2794,7 +2791,9 @@ class Extension:
             dictionary_types.setdefault("attributes", {})
         )
         self._annotate_object_children(dictionary_types_attributes)
-        self._annotate_object_children(self.profiles)
+
+        # self._annotate_object_children(self.profiles)
+        self._annotate_item_with_attributes(self.profiles)
 
 
 def _extension_j_value_key(v: JValue):

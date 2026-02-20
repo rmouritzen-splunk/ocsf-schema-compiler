@@ -1,3 +1,6 @@
+from ocsf_schema_compiler.jsonish import JObject, j_string
+
+
 def extension_scoped_category_uid(extension_uid: int, category_uid: int) -> int:
     """Return an extension-specific category UID for a base schema category."""
     assert category_uid < 100, (
@@ -26,3 +29,10 @@ def class_uid_scoped_type_uid(cls_uid: int, type_uid: int) -> int:
 def to_extension_scoped_name(extension: str, name: str) -> str:
     """Returns an extension-scoped name."""
     return f"{extension}/{name}"
+
+
+def full_name(item: JObject) -> str:
+    """Returns name of item including extension scope if from an extension."""
+    if "extension" in item:
+        return f"{item['extension']}/{item['name']}"
+    return j_string(item["name"])
