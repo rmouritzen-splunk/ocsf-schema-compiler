@@ -1,0 +1,11 @@
+{
+  "caption": "Alpha",
+  "description": "The Alpha object.",
+  "extends": "object",
+  "name": "alpha",
+  "attributes": {
+    "message": {
+      "requirement": "recommended"
+    }
+  }
+}

@@ -110,16 +110,23 @@ Second, the new compiler uses `profiles` in class and object attributes. The all
 ## Errors detected by new compiler
 The new compiler is stricter than the legacy compiler.
 
-### Error: extensions modifications of dictionary types is not supported
-Extensions are not allowed to modify any existing dictionary types. Modifications of dictionary types can easily lead to incompatibilities between events using this extension and events not using it, even for events that otherwise do not use extension additions or changes.
+### ~~Error: extensions modifications of dictionary types is not supported~~
+~~Extensions are not allowed to modify any existing dictionary types. Modifications of dictionary types can easily lead to incompatibilities between events using this extension and events not using it, even for events that otherwise do not use extension additions or changes.~~
 
-**TODO:** Reconfirm after deciding unscoped vs. scoped dictionary types issue.
+This is changed with ocsf-schema-compiler v0.9.8. See next section.
 
-### Error: extension patches can only patch the base schema
-Extensions can only patches classes and objects in the base schema, including the platform extensions in the base schema.
+### Error: extension dictionary type name collision with base schema dictionary type
 
-**TODO:** This is no longer true.
+Dictionary types defined in extensions other than platform extension are now extension-scoped by default. Dictionary types defined in platform extension remain unscoped for backwards compatibility. When the unscoped dictionary types option is enabled, name collisions with the base dictionary types is an error.
 
+If you are maintaining an extension, and this error occurs when compiling with a new version of the base schema, this means your extension is no longer compatible with the base schema from that version and forward. Your only options are to use a different dictionary type name in your extensions (a backwards incompatible change that _might_ be tolerable in your organization's specific usage), or create your own incompatible fork of the base schema. In other words, you're stuck and there is no good path forward.
+
+This is new behavior. The old compiler allowed modifying base schema dictionary types, silently allowing the possibility to create a schema incompatible with a schema compiled without your extension.
+
+### ~~Error: extension patches can only patch the base schema~~
+~~Extensions can only patches classes and objects in the base schema, including the platform extensions in the base schema.~~
+
+This is changed with ocsf-schema-compiler v0.9.8. Extensions can patch items patched by other extensions.
 
 ## TODO issues and changes
 
@@ -131,26 +138,35 @@ Extensions can only patches classes and objects in the base schema, including th
     - This has always been true.
 - Extensions can add dictionary types, but cannot modify them.
     - This is changed. Old compiler allowed extensions to modify dictionary types.
-- Removed support for the undocumented "overwrite" property of dictionary attributes.
-    - The dictionary attribute "overwrite" property is not supported by the metaschema.
-    - I suspect that the "overwrite" property has never been actively used.
+    - This was always unsafe.
+- New compiler removes support for the undocumented "overwrite" property of dictionary attributes.
+    - The dictionary attribute "overwrite" property has never been supported by the metaschema.
+        - I suspect that the "overwrite" property has never been actively used.
     - The old compiler allowed modification of dictionary attributes with this property.
-- When extension classes and objects extend from classes or objects in their own extension, the `extends` value includes the extension scope. Example:
-    - Extension `extra` defines classes `foo` and `bar`.
-    - Class `bar` extends `foo`.
-    - New compiler result: the `extends` value in class `bar` will be `extra/foo` (scoped).
-    - Old compiler result: the `extends` value in claas `bar` will be `foo` (unscoped).
-    - Note that retaining the old behavior flattens the namespace of classes and objects, essentially making these names unscoped.
-- When an extension modifies a base schema dictionary attribute, the old compiler would retain the original dictionary attribute and add the extension's attribute with a scope. Example:
-    - Extension `extra` modifies dictionary attribute `comment`.
-    - New compiler result: dictionary attribute `comment` is modified. The modified attribute is consistently used everywhere.
-    - Old compiler result: dictionary attribute `comment` is unmodified and dictionary attribute `extra/comment` is added.
-        - There are now two versions of this attribute.
-        - The schema browser shows only the original attribute, and only mention references from the base schema to the original attribute.
-        - Extension items (classes, objects, and profiles) that use the modified dictionary attribute contain details the modified attribute. Note that the attribute name is unscoped in this case, so its details will not match those for the unscoped name in the data dictionary.
-        - This behavior is similar to how classes, objects, and profiles can modify dictionary attributes when used in a specific case; typically to change the description as well as add enum values.
-        - However, this behavior breaks OCSF's contract of a single consistent data dictionary, allowing each extension to have its own variation of a dictionary attribute, shared among all items in the extension. This makes a certain amount of sense, however it might be unexpected.
-
+        - THis creates the possibility of incompatible schemas.
+- Extension things that are scoped in a compiled schema (note: these are consistent with the old compiler unless otherwise noted):
+    - Categories
+        - Category names in `categories.attributes` are scoped.
+        - (Note: the categories themselves do not have a `name` property, unlike classes, objects, and profiles.)
+    - Dictionary attributes
+        - Dictionary attribute names are scoped in `dictionary.attributes`.
+        - Dictionary attribute names are not scoped when used in classes, objects, profiles.
+            - Must add attribute's `extension` to name to create extension-scoped name to lookup up in `dictionary.attributes`.
+    - Dictionary types
+        - Scoping depends on new compiler options, allowing avoidance of name collisions.
+        - Options make it possible to create compiled output fully consistent with old compiler.
+        - Dictionary types in `dictionary.types.attributes`: **TODO**
+        - Dictionary types in classes, objects, profiles: **TODO**
+    - Classes
+        - Class names are scoped in `classes`.
+        - Class names are not scoped in a class's `name` or `extends` properties.
+            - Must add classes's `extension` to name to create extension-scoped name to lookup up in `classes`.
+    - Objects
+        - Object names are scoped in `objects`.
+        - Object names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
+    - Profiles
+        - Profile names are scoped in `profiles`.
+        - Profile names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
 
 ### Compiler issues and changes
 

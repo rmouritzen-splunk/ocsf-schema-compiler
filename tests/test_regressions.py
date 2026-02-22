@@ -142,7 +142,19 @@ class TestRegressions(unittest.TestCase):
                 "alpha/video_game_activity",
                 "category",
             ),
-            "Category should be extension-scoped",
+            "Extension class using extension category should be extension-scoped",
+        )
+
+        self.assertEqual(
+            "video_game_activity",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "name",
+            ),
+            "Extension class name should not be extension-scoped"
+            " (consistent with old compiler)",
         )
 
         self.assertEqual(
@@ -153,18 +165,43 @@ class TestRegressions(unittest.TestCase):
                 "alpha/system_comment",
                 "category",
             ),
-            "Category should not be extension-scoped",
+            "Extension class using base category should not be extension-scoped",
         )
 
         self.assertEqual(
-            "alpha/system_comment",
+            "system_comment",
             get_in(
                 schema,
                 "classes",
                 "alpha/system_comment_plus",
                 "extends",
             ),
-            "Extends should be extension-scoped",
+            "Extension class extends of extension class should not be extension-scoped"
+            " (consistent with old compiler)",
+        )
+
+        self.assertEqual(
+            "alpha",
+            get_in(
+                schema,
+                "objects",
+                "alpha/alpha",
+                "name",
+            ),
+            "Extension object name should not be extension-scoped"
+            " (consistent with old compiler)",
+        )
+
+        self.assertEqual(
+            "alpha",
+            get_in(
+                schema,
+                "objects",
+                "alpha/alpha_plus",
+                "extends",
+            ),
+            "Extension object extends of extension object should not be"
+            " extension-scoped (consistent with old compiler)",
         )
 
         # The default compile uses extension-scoped dictionary type names
@@ -178,7 +215,7 @@ class TestRegressions(unittest.TestCase):
                 "video_game_name",
                 "type",
             ),
-            "Dictionary type should be extension-scoped",
+            "Dictionary type should be extension-scoped (new compiler default)",
         )
 
         baseline_schema = read_json_object_zstandard_file(

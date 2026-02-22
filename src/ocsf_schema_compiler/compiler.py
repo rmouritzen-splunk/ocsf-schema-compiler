@@ -336,7 +336,6 @@ class SchemaCompiler:
         # extension items.
         # (The "name" property inside class, object, and profiles is not scoped.)
         self._extension_scope_class_categories(extensions)
-        self._extension_scope_extends(extensions)
         self._extension_scope_types(extensions)
         self._extension_scope_all_profiles_uses(extensions)
 
@@ -523,20 +522,6 @@ class SchemaCompiler:
                 cat_name = j_string_optional(cls.get("category"))
                 if cat_name and cat_name in ext_cat_attributes:
                     cls["category"] = to_extension_scoped_name(extension.name, cat_name)
-
-    def _extension_scope_extends(self, extensions: list[Extension]) -> None:
-        for extension in extensions:
-            for cls in extension.classes.values():
-                cls = j_object(cls)
-                extends = j_string_optional(cls.get("extends"))
-                if extends and extends in extension.classes:
-                    cls["extends"] = to_extension_scoped_name(extension.name, extends)
-
-            for obj in extension.objects.values():
-                obj = j_object(obj)
-                extends = j_string_optional(obj.get("extends"))
-                if extends and extends in extension.objects:
-                    obj["extends"] = to_extension_scoped_name(extension.name, extends)
 
     def _extension_scope_types(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -1665,7 +1650,7 @@ class SchemaCompiler:
             source_attribute = j_object(source_attribute)
             if source_attribute_name in dest_attributes:
                 dest_attribute = j_object(dest_attributes[source_attribute_name])
-                self._merge_attribute_detail(
+                self._merge_attribute_properties(
                     dest_attribute,
                     source_attribute,
                     f'{context} attribute "{source_attribute_name}"',
@@ -1673,7 +1658,7 @@ class SchemaCompiler:
             else:
                 dest_attributes[source_attribute_name] = source_attribute
 
-    def _merge_attribute_detail(
+    def _merge_attribute_properties(
         self, dest_attribute: JObject, source_attribute: JObject, context: str
     ) -> None:
         for source_key, source_value in source_attribute.items():
@@ -1769,51 +1754,63 @@ class SchemaCompiler:
         for item_name, item in items.items():
             self._resolve_item_extends(items, item_name, j_object(item), kind)
 
-    def _resolve_item_extends(
-        self, items: JObject, item_name: str | None, item: JObject | None, kind: str
-    ) -> None:
-        if item_name is None or item is None:
-            return
-
-        parent_name = j_string_optional(item.get("extends"))
-        parent = None
-        if parent_name:
-            parent = j_object(items[parent_name])
-        self._resolve_item_extends(items, parent_name, parent, kind)
-        assert parent_name == item.get("extends"), (
-            f'{kind} "{item_name}" "extends" value should not change after'
-            f' recursively processing parent: original value: "{parent_name}",'
-            f' current value: "{item.get("extends", "<deleted>")}"'
+    def _get_extends_parent(
+        self, items: JObject, item_name: str, item: JObject, kind: str
+    ) -> tuple[str, JObject]:
+        parent_name = j_string(item["extends"])
+        if "extension" in item:
+            ext_parent_name = to_extension_scoped_name(
+                j_string(item["extension"]), parent_name
+            )
+            if ext_parent_name in items:
+                return ext_parent_name, j_object(items[ext_parent_name])
+        if parent_name in items:
+            return parent_name, j_object(items[parent_name])
+        raise SchemaException(
+            f'{kind} "{item_name}" extends undefined {kind} "{parent_name}"'
         )
 
-        if parent_name:
-            parent_item = j_object_optional(items.get(parent_name))
-            if parent_item:
-                # Create flattened item by merging item on top of a copy of it's parent
-                # with the result that new and overlapping things in item "win" over
-                # those in parent. This new item replaces the existing one.
-                new_item = deep_copy_j_object(parent_item)
-                # The values of most keys simply replace what is in the parent, except
-                # for attributes and profiles
-                for source_key, source_value in item.items():
-                    if source_key == "attributes":
-                        new_attributes = j_object(new_item.get("attributes", {}))
-                        self._merge_attributes(
-                            new_attributes,
-                            j_object(source_value),
-                            f'{kind} "{item_name}" extending "{parent_name}"',
-                        )
-                        new_item["attributes"] = new_attributes
-                    elif source_key == "profiles":
-                        self._merge_profiles(new_item, item)
-                    else:
-                        new_item[source_key] = source_value
+    def _resolve_item_extends(
+        self, items: JObject, item_name: str, item: JObject, kind: str
+    ) -> None:
+        if "extends" not in item:
+            return
 
-                items[item_name] = new_item
-            else:
-                raise SchemaException(
-                    f'{kind} "{item_name}" extends undefined {kind} "{parent_name}"'
+        original_parent_name, original_parent = self._get_extends_parent(
+            items, item_name, item, kind
+        )
+        # Extends resolution is recursive... resolve parent first
+        self._resolve_item_extends(items, original_parent_name, original_parent, kind)
+
+        # Get parent again in case extends resolution has changed it
+        parent_name, parent = self._get_extends_parent(items, item_name, item, kind)
+        assert parent_name == original_parent_name, (
+            f'{kind} "{item_name}" "extends" value should not change after'
+            f' recursively processing parent: original value: "{original_parent_name}",'
+            f' current value: "{parent_name}"'
+        )
+
+        # Create flattened item by merging item on top of a copy of it's parent
+        # with the result that new and overlapping things in item _win_ over
+        # those in parent. This new item replaces the existing one.
+        new_item = deep_copy_j_object(parent)
+        # The values of most keys simply replace what is in the parent, except
+        # for attributes and profiles
+        for source_key, source_value in item.items():
+            if source_key == "attributes":
+                new_attributes = j_object(new_item.get("attributes", {}))
+                self._merge_attributes(
+                    new_attributes,
+                    j_object(source_value),
+                    f'{kind} "{item_name}" extending "{parent_name}"',
                 )
+                new_item["attributes"] = new_attributes
+            elif source_key == "profiles":
+                self._merge_profiles(new_item, item)
+            else:
+                new_item[source_key] = source_value
+
+        items[item_name] = new_item
 
     def _enrich_and_validate_dictionary(self) -> None:
         if self.browser_mode:
