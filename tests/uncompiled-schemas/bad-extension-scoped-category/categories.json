@@ -1,0 +1,12 @@
+{
+  "caption": "Categories",
+  "description": "The OCSF categories for the Problem extension.",
+  "name": "category",
+  "attributes": {
+    "linux/problem": {
+      "uid": 1,
+      "caption": "Problem",
+      "description": "Problem category illegally using a scoped name."
+    }
+  }
+}

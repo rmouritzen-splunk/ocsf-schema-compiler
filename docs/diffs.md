@@ -97,6 +97,7 @@ This has been largely changed. **TODO** Remove the strike-through paragraphs and
 
 **TODO** Describe new handling. Shadowing. Dictionary types.
 
+**NOTE:** class, object, and profile `name` fields are not scoped. (This is unchanged from old compiler to new compiler.)
 
 
 ### Difference 8: class and object attribute profile change
@@ -112,45 +113,15 @@ The new compiler is stricter than the legacy compiler.
 ### Error: extensions modifications of dictionary types is not supported
 Extensions are not allowed to modify any existing dictionary types. Modifications of dictionary types can easily lead to incompatibilities between events using this extension and events not using it, even for events that otherwise do not use extension additions or changes.
 
+**TODO:** Reconfirm after deciding unscoped vs. scoped dictionary types issue.
+
 ### Error: extension patches can only patch the base schema
 Extensions can only patches classes and objects in the base schema, including the platform extensions in the base schema.
 
-TODO: This is no longer true.
+**TODO:** This is no longer true.
 
 
 ## TODO issues and changes
-- General dictionary attribute question: what sort of changes do we want to allow? There are two cases: extension changes of dictionary attributes, and changes made by classes, objects, and profiles.
-- Let's consider extension changes to the dictionary attributes.
-    - Currently almost anything is possible.
-    - Should this even be allowed?
-    - If allowed, what should happen when multiple extensions modify the same dictionary attribute?
-        - Caption? Currently last modifier wins.
-        - Description? Currently last modifier wins.
-        - Type? Currently last modifier wins.
-        - Enums? Merged but with overlaps, last modifier wins.
-        - Is Array? Currently last modifier wins.
-        - Requirement? New compiler uses most relaxed requirement.
-    - With the new compiler, extensions are processed in a consistent order.
-        - Platform extensions are applied first, in ascending UID order.
-        - Non-platform extensions are applied next, in ascending UID order.
-    - With the old compiler, extensions are processed in a partially sorted order.
-        - The only order possible with with the list of paths supplied by the `SCHEMA_EXTENSION` environment variable.
-        - Within each of the `SCHEMA_EXTENSION` elements, there is no ordering.
-            - The implementation walks each path element, and the filenames are not sorted.
-- Next let's consider class, object, and profile modifications of attributes.
-    - Again, almost anything is possible.
-    - We could restrict to the following:
-        - Change description.
-        - Adding enum values.
-        - Add requirement.
-        - Add group.
-        - Add profile.
-        - Change type and compatible way (relax type, relax constraint).
-    - Other changes would not be allowed, either becoming an warning and ignored, or an error.
-        - Caption.
-        - Incompatible type change, including `is_array`.
-        - Change existing enum values.
-
 
 ### This doc
 - Describe extension application order. Explain why this is done.
@@ -182,12 +153,31 @@ TODO: This is no longer true.
 
 
 ### Compiler issues and changes
-**TODO** items for this compiler.
-TODO: Check for shadowed categories, classes, objects, profiles
 
-TODO: When shadowed dictionary attribute or type detected, check if attribute is compatible with base. Error or warning should indicate if it looks possible to remove the attribute or type from extension as this should be backwards compatible. Implementation-wise, perhaps use a callback for situation-specific incompatibility checks and messages. (edited)
+#### TODO items for this compiler.
 
-TODO: With extension categories and classes, do extensions use scoped or un-scoped names?
+Legacy output should use one higher level of nesting. Top level should have categories, profiles, extensions, and export schema (what output now).
+
+- Define and describe exactly what is allowed during attribute merging.
+    - This occurs during patching as well as dictionary attribute to class, object, and profile attribute merging.
+    - `SchemaCompiler._merge_attribute_detail`
+        - Call tree:
+            - `SchemaCompiler._merge_attribute_detail`
+                - `SchemaCompiler._merge_attributes`
+                    - `SchemaCompiler._merge_attributes_include`
+                        - `SchemaCompiler._resolve_item_includes`
+                            - `SchemaCompiler._resolve_includes`
+                            - `SchemaCompiler._resolve_extension_includes`
+                    - `SchemaCompiler._resolve_patches`
+                    - `SchemaCompiler._resolve_item_extends`
+- Compare `SchemaCompiler._merge_attribute_detail_include` to `SchemaCompiler._merge_attribute_detail`.
+    - Note, and possibly raise error, for changes that can cause an incompatibility.
+    - Call tree:
+        - `SchemaCompiler._merge_attribute_detail_include`
+            - `SchemaCompiler._resolve_item_includes`
+                - `SchemaCompiler._resolve_includes`
+                - `SchemaCompiler._resolve_extension_includes`
+
 
 ### Server issues
 **TODO** items for `ocsf-server`. These apply to v3 and v4 unless notes.

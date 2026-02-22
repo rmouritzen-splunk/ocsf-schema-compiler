@@ -65,6 +65,7 @@ class SchemaCompiler:
         schema_path: Path,
         ignore_platform_extensions: bool = False,
         extensions_paths: list[Path] | None = None,
+        unscoped_dictionary_types: bool = False,
         allow_shadowing: bool = False,
         browser_mode: bool = False,
         legacy_mode: bool = False,
@@ -75,6 +76,7 @@ class SchemaCompiler:
         self.schema_path: Path = schema_path
         self.ignore_platform_extensions: bool = ignore_platform_extensions
         self.extensions_paths: list[Path] | None = extensions_paths
+        self.unscoped_dictionary_types: bool = unscoped_dictionary_types
         self.allow_shadowing: bool = allow_shadowing
         self.browser_mode: bool = browser_mode
         self.legacy_mode: bool = legacy_mode
@@ -94,6 +96,17 @@ class SchemaCompiler:
             logger.info(
                 "Including extensions path(s): %s",
                 ", ".join(list(map(str, self.extensions_paths))),
+            )
+        if self.unscoped_dictionary_types:
+            logger.info(
+                "Extension defined dictionary types will be un-scoped."
+                " A name collision with another dictionary type will cause an error."
+            )
+        else:
+            logger.info(
+                "Extension defined dictionary types will be extension-scoped, other"
+                " than platform extension dictionary types, which will remain"
+                " un-scoped for backwards compatibility."
             )
         if self.allow_shadowing:
             logger.info(
@@ -129,6 +142,7 @@ class SchemaCompiler:
         # browser, not the complete data used during schema compilation. The values in
         # this JObject are thus a subset of the information in the Extension dataclass.
         self._extensions: JObject = {}
+        self._platform_extension_id_set: frozenset[int] = frozenset()
 
         self._include_cache: dict[Path, JObject] = {}
         # Observable type_id values extracted from all observable sources
@@ -183,7 +197,7 @@ class SchemaCompiler:
         self._consolidate_class_profiles()
         self._verify_class_attributes_and_add_datetime()
 
-        # TODO: we we need self._verify_profile_attributes_and_add_datetime() ?
+        # TODO: do we need self._verify_profile_attributes_and_add_datetime() ?
 
         self._ensure_attributes_have_requirement()
 
@@ -318,9 +332,12 @@ class SchemaCompiler:
             # Add extension and extension_id values to most things in this extension
             extension.annotate()
 
+        # Before merging to base schema, we need to add scope (most) names used inside
+        # extension items.
+        # (The "name" property inside class, object, and profiles is not scoped.)
         self._extension_scope_class_categories(extensions)
         self._extension_scope_extends(extensions)
-        self._extension_scope_object_types(extensions)
+        self._extension_scope_types(extensions)
         self._extension_scope_all_profiles_uses(extensions)
 
         self._merge_extensions_categories(extensions)
@@ -333,7 +350,11 @@ class SchemaCompiler:
         # Create extension information. This information is needed for the
         # self._browser_mode output format, as well as the final information log showing
         # what was included in the compilation.
+        platform_ids: list[int] = []
         for extension in extensions:
+            if extension.is_platform_extension:
+                platform_ids.append(extension.uid)
+
             self._extensions[extension.name] = {
                 "uid": extension.uid,
                 "name": extension.name,
@@ -342,6 +363,8 @@ class SchemaCompiler:
                 "description": extension.description,
                 "version": extension.version,
             }
+
+        self._platform_extension_id_set = frozenset(platform_ids)
 
     def _read_extensions(self) -> list[Extension]:
         extensions: list[Extension] = []
@@ -494,12 +517,12 @@ class SchemaCompiler:
 
     def _extension_scope_class_categories(self, extensions: list[Extension]) -> None:
         for extension in extensions:
-            ext_cat_attributes = extension.categories.get("attributes", {})
+            ext_cat_attributes = j_object(extension.categories.get("attributes", {}))
             for cls in extension.classes.values():
                 cls = j_object(cls)
                 cat_name = j_string_optional(cls.get("category"))
-                if cat_name and ext_cat_attributes:
-                    cls["category"] = f"{extension.name}/{cat_name}"
+                if cat_name and cat_name in ext_cat_attributes:
+                    cls["category"] = to_extension_scoped_name(extension.name, cat_name)
 
     def _extension_scope_extends(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -507,56 +530,66 @@ class SchemaCompiler:
                 cls = j_object(cls)
                 extends = j_string_optional(cls.get("extends"))
                 if extends and extends in extension.classes:
-                    cls["extends"] = f"{extension.name}/{extends}"
+                    cls["extends"] = to_extension_scoped_name(extension.name, extends)
 
             for obj in extension.objects.values():
                 obj = j_object(obj)
                 extends = j_string_optional(obj.get("extends"))
                 if extends and extends in extension.objects:
-                    obj["extends"] = f"{extension.name}/{extends}"
+                    obj["extends"] = to_extension_scoped_name(extension.name, extends)
 
-    def _extension_scope_object_types(self, extensions: list[Extension]) -> None:
+    def _extension_scope_types(self, extensions: list[Extension]) -> None:
         for extension in extensions:
             for cls in extension.classes.values():
                 cls = j_object(cls)
-                self._extension_scope_attribute_object_types(
+                self._extension_scope_attribute_types(
                     extension,
                     j_object(cls.setdefault("attributes", {})),
                 )
             for cls_patch in extension.class_patches.values():
                 cls_patch = j_object(cls_patch)
-                self._extension_scope_attribute_object_types(
+                self._extension_scope_attribute_types(
                     extension,
                     j_object(cls_patch.setdefault("attributes", {})),
                 )
             for obj in extension.objects.values():
                 obj = j_object(obj)
-                self._extension_scope_attribute_object_types(
+                self._extension_scope_attribute_types(
                     extension,
                     j_object(obj.setdefault("attributes", {})),
                 )
             for obj_patch in extension.object_patches.values():
                 obj_patch = j_object(obj_patch)
-                self._extension_scope_attribute_object_types(
+                self._extension_scope_attribute_types(
                     extension,
                     j_object(obj_patch.setdefault("attributes", {})),
                 )
-            self._extension_scope_attribute_object_types(
+            self._extension_scope_attribute_types(
                 extension,
                 j_object(extension.dictionary.setdefault("attributes", {})),
             )
 
-    def _extension_scope_attribute_object_types(
+    def _extension_scope_attribute_types(
         self,
         extension: Extension,
         attributes: JObject,
     ) -> None:
+        use_scoped_dictionary_types = self._extension_uses_scoped_dictionary_types(
+            extension
+        )
+        dictionary_types = j_object(extension.dictionary.get("types", {}))
+        dictionary_types_attributes = j_object(dictionary_types.get("attributes", {}))
         for attribute in attributes.values():
             attribute = j_object(attribute)
             if "type" in attribute:
                 type_name = attribute["type"]
-                if type_name in extension.objects:
-                    attribute["type"] = f"{extension.name}/{type_name}"
+                if (
+                    use_scoped_dictionary_types
+                    and type_name in dictionary_types_attributes
+                ) or type_name in extension.objects:
+                    attribute["type"] = to_extension_scoped_name(
+                        extension.name, type_name
+                    )
 
     def _extension_scope_all_profiles_uses(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -648,7 +681,9 @@ class SchemaCompiler:
             if profile_name in extension.profiles:
                 # This is normal - an extension's use of its own profiles are not
                 # scoped. We will add the scope for the compiled schema.
-                scoped_profile_name = f"{extension.name}/{profile_name}"
+                scoped_profile_name = to_extension_scoped_name(
+                    extension.name, profile_name
+                )
                 logger.debug(
                     '%s references this extension\'s own profile "%s"; changing to'
                     ' "%s".',
@@ -934,12 +969,14 @@ class SchemaCompiler:
             if "attributes" in extension.categories:
                 ext_cat_attributes = j_object(extension.categories["attributes"])
                 for cat_name, cat in ext_cat_attributes.items():
-                    if "/" in cat_name:
-                        raise SchemaException(
-                            f"Illegal use of extension-scope in extension"
-                            f' "{extension.name}" category name "{cat_name}"'
-                        )
-                    base_cat_attributes[f"{extension.name}/{cat_name}"] = cat
+                    self._check_shadowed_name(
+                        extension.name,
+                        "category",
+                        cat_name,
+                        base_cat_attributes,
+                    )
+                    scoped_cat_name = to_extension_scoped_name(extension.name, cat_name)
+                    base_cat_attributes[scoped_cat_name] = cat
 
     def _merge_extensions_classes(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -965,7 +1002,8 @@ class SchemaCompiler:
         """Merge extension class and objects."""
         for ext_item_name, ext_item in extension_items.items():
             self._check_shadowed_name(extension_name, kind, ext_item_name, base_items)
-            base_items[f"{extension_name}/{ext_item_name}"] = ext_item
+            scoped_name = to_extension_scoped_name(extension_name, ext_item_name)
+            base_items[scoped_name] = ext_item
 
     def _merge_extensions_dictionary(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -989,48 +1027,51 @@ class SchemaCompiler:
                     f' dictionary attribute "{ext_attribute_name}"'
                 )
 
-            base_dict_attributes[f"{extension.name}/{ext_attribute_name}"] = (
-                ext_attribute
-            )
+            scoped_name = to_extension_scoped_name(extension.name, ext_attribute_name)
+            base_dict_attributes[scoped_name] = ext_attribute
 
         if "types" in extension.dictionary:
+            use_scoped_types = self._extension_uses_scoped_dictionary_types(extension)
+
             base_types = j_object(self._dictionary.setdefault("types", {}))
             base_types_attributes = j_object(base_types.setdefault("attributes", {}))
             ext_types = j_object(extension.dictionary["types"])
             ext_types_attributes = j_object(ext_types.setdefault("attributes", {}))
             for ext_type_name, ext_type in ext_types_attributes.items():
-                if "/" in ext_type_name:
-                    raise SchemaException(
-                        "Illegal use of extension-scope in extension"
-                        f' "{extension.name}" dictionary type "{ext_type_name}"'
-                    )
                 ext_type = j_object(ext_type)
-                if ext_type_name in base_types_attributes:
-                    base_attribute = j_object(base_types_attributes[ext_type_name])
-                    # TODO: scoped - allow if shadowing is enabled
-                    if "extension" in base_attribute:
-                        raise SchemaException(
-                            "LOGIC BUG: base dictionary type with unscoped name"
-                            f' "{ext_type_name}" unexpectedly has "extension" field'
-                        )
-                    # TODO: scoped - mention flag to allow shadowing
-                    # raise SchemaException(
-                    #     f'Extension "{extension.name}" dictionary type'
-                    #     f' "{ext_type_name}" shadows base dictionary type'
-                    # )
-                    # TODO: scoped - for now we are using unscoped dictionary types
-                    #       considering scoping (by default)
-                    #       Also for now, this is a collision error
-                    raise SchemaException(
-                        f'Extension "{extension.name}" dictionary type'
-                        f' "{ext_type_name}" collides with base dictionary type;'
-                        " this is not supported as it would break compatibilityx"
+                if use_scoped_types:
+                    self._check_shadowed_name(
+                        extension.name,
+                        "dictionary type",
+                        ext_type_name,
+                        base_types_attributes,
                     )
-
-                # TODO: scoped - for now we are using unscoped dictionary types
-                #       considering scoping (by default)
-                # base_types_attributes[f"{extension.name}/{ext_type_name}"] = ext_type
-                base_types_attributes[ext_type_name] = ext_type
+                    scoped_name = to_extension_scoped_name(
+                        extension.name, ext_type_name
+                    )
+                    base_types_attributes[scoped_name] = ext_type
+                else:
+                    if "/" in ext_type_name:
+                        raise SchemaException(
+                            f"Illegal use of extension-scope in extension"
+                            f' "{extension.name}" dictionary type "{ext_type_name}";'
+                            " shadowing or modifying a dictionary type"
+                            " from another extension is not allowed"
+                        )
+                    if ext_type_name in base_types_attributes:
+                        base_attribute = j_object(base_types_attributes[ext_type_name])
+                        if "extension" in base_attribute:
+                            raise SchemaException(
+                                "LOGIC BUG: base dictionary type with unscoped name"
+                                f' "{ext_type_name}" unexpectedly has "extension" field'
+                            )
+                        raise SchemaException(
+                            f'Extension "{extension.name}" dictionary type'
+                            f' "{ext_type_name}" collides with'
+                            " base schema dictionary type;"
+                            " this is not supported as it would break compatibility"
+                        )
+                    base_types_attributes[ext_type_name] = ext_type
 
     def _merge_extensions_profiles(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -1042,7 +1083,8 @@ class SchemaCompiler:
                         profile_name,
                         self._profiles,
                     )
-                    self._profiles[f"{extension.name}/{profile_name}"] = profile
+                    scoped_name = to_extension_scoped_name(extension.name, profile_name)
+                    self._profiles[scoped_name] = profile
 
     def _append_extension_patches(self, extensions: list[Extension]) -> None:
         for extension in extensions:
@@ -1057,13 +1099,14 @@ class SchemaCompiler:
         """
         Converts dictionary types not defined in dictionary's types to object types.
         """
-        types = j_object(self._dictionary.setdefault("types", {}))
-        types_attributes = j_object(types.setdefault("attributes", {}))
         dictionary_attributes = j_object(self._dictionary.setdefault("attributes", {}))
         for attribute_name, attribute in dictionary_attributes.items():
             attribute = j_object(attribute)
             attribute_type_name = j_string(attribute.get("type"))
-            if attribute_type_name not in types_attributes:
+            possible_dict_type = self._get_possible_dictionary_type(
+                attribute_type_name, attribute
+            )
+            if possible_dict_type is None:
                 attribute["type"] = "object_t"
                 if attribute_type_name not in self._objects:
                     raise SchemaException(
@@ -1787,9 +1830,7 @@ class SchemaCompiler:
             raise SchemaException('Schema has not defined a "base_event" class')
         base_event = j_object(self._classes["base_event"])
         link = self._make_link("common", "base_event", base_event)
-        self._add_links_to_dictionary_attributes(
-            "class", "base_event", base_event, link
-        )
+        self._add_links_to_dictionary_attributes(base_event, link)
 
     def _add_class_dictionary_attribute_links(self) -> None:
         if not self.browser_mode:
@@ -1797,7 +1838,7 @@ class SchemaCompiler:
         for cls_name, cls in self._classes.items():
             cls = j_object(cls)
             link = self._make_link("class", cls_name, cls)
-            self._add_links_to_dictionary_attributes("class", cls_name, cls, link)
+            self._add_links_to_dictionary_attributes(cls, link)
 
     def _add_object_dictionary_attribute_links(self) -> None:
         if not self.browser_mode:
@@ -1805,7 +1846,7 @@ class SchemaCompiler:
         for obj_name, obj in self._objects.items():
             obj = j_object(obj)
             link = self._make_link("object", obj_name, obj)
-            self._add_links_to_dictionary_attributes("object", obj_name, obj, link)
+            self._add_links_to_dictionary_attributes(obj, link)
 
     @staticmethod
     def _make_link(group: str, item_name: str, item: JObject) -> JObject:
@@ -1833,9 +1874,7 @@ class SchemaCompiler:
 
         links.sort(key=link_to_key)
 
-    def _add_links_to_dictionary_attributes(
-        self, kind: str, item_name: str, item: JObject, link: JObject
-    ) -> None:
+    def _add_links_to_dictionary_attributes(self, item: JObject, link: JObject) -> None:
         if not self.browser_mode:
             return
         item_attributes = j_object(item.setdefault("attributes", {}))
@@ -1927,14 +1966,14 @@ class SchemaCompiler:
         for attribute_name, attribute in dictionary_attributes.items():
             attribute = j_object(attribute)
             if "type" in attribute:
-                attribute_type = attribute["type"]
+                attribute_type_name = j_string(attribute["type"])
             else:
                 raise SchemaException(
                     self._dictionary_error_message(
                         attribute_name, attribute, 'does not define "type"'
                     )
                 )
-            if attribute_type == "object_t":
+            if attribute_type_name == "object_t":
                 # Object dictionary type
                 # Add "object_name" to attribute details based on caption.
                 # NOTE: This must be done after resolving patches and extends so caption
@@ -1953,15 +1992,17 @@ class SchemaCompiler:
                     )
             else:
                 # Normal dictionary type
-                if attribute_type in dictionary_types_attributes:
-                    type_detail = j_object(dictionary_types_attributes[attribute_type])
-                    attribute["type_name"] = type_detail.get("caption", "")
+                dictionary_type = self._get_possible_dictionary_type(
+                    attribute_type_name, attribute
+                )
+                if dictionary_type:
+                    attribute["type_name"] = dictionary_type.get("caption", "")
                 else:
                     raise SchemaException(
                         self._dictionary_error_message(
                             attribute_name,
                             attribute,
-                            f'uses undefined "type" "{attribute_type}"',
+                            f'uses undefined "type" "{attribute_type_name}"',
                         )
                     )
 
@@ -2452,10 +2493,6 @@ class SchemaCompiler:
                     del profile["attributes"]
 
     def _finish_item_attributes(self, items: JObject, kind: str) -> None:
-        dictionary_types = j_object(self._dictionary.setdefault("types", {}))
-        dictionary_types_attributes = j_object(
-            dictionary_types.setdefault("attributes", {})
-        )
         for item_name, item in items.items():
             item = j_object(item)
             attributes = j_object(item.setdefault("attributes", {}))
@@ -2467,7 +2504,6 @@ class SchemaCompiler:
                     kind,
                     attribute_name,
                     j_object(attribute),
-                    dictionary_types_attributes,
                 )
                 new_attributes[attribute_name] = new_attribute
             item["attributes"] = new_attributes
@@ -2481,70 +2517,61 @@ class SchemaCompiler:
         kind: str,
         attribute_name: str,
         attribute: JObject,
-        dictionary_types_attributes: JObject,
     ) -> JObject:
-        # TODO: scoped - class and obj "name" property fields are not scoped
-        #       both in old compiler and here. Should they they be by default?
-        #       Side effects? Used anywhere? Schema browser?
-
         dict_attribute = self._get_dictionary_attribute(item, attribute_name, attribute)
         new_attribute = deep_copy_j_object(dict_attribute)
         deep_merge(new_attribute, attribute)
 
         # Check if the item attribute's type has been changed, because if so,
         # we need make sure the type_name ends up with the correct value.
+
         if "type" in attribute:
-            # TODO: scoped - scope dictionary types (by default)?
-            attribute_type = attribute["type"]
-            if attribute_type != dict_attribute["type"]:
+            attribute_type_name = j_string(attribute["type"])
+            if attribute_type_name != dict_attribute["type"]:
                 # This item attribute's type has been changed.
                 # We only allow a compatible subtype in this case.
                 # In general, a subtype could be a dictionary subtype or an object
                 # that inherits from a parent object (a derived object).
                 # Currently this compiler only supports dictionary subtypes, not
                 # object subtypes, though object subtypes are possible.
-                if attribute_type not in dictionary_types_attributes:
-                    raise SchemaException(
-                        f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                        f' refined type "{attribute_type}", however the base type'
-                        f" is not a defined dictionary type. Note: refining object"
-                        f" types is not supported, though possible; file an issue"
-                        f" if this is needed."
-                    )
+
                 # Make sure subtype of this attribute matches the original
                 # attribute's type
                 original_type = dict_attribute["type"]
-                dict_type = j_object(dictionary_types_attributes[attribute_type])
-                subtype = dict_type["type"]
+                dictionary_type = self._get_dictionary_type(
+                    item, attribute_type_name, attribute
+                )
+                subtype = dictionary_type.get("type")
                 if subtype != original_type:
                     raise SchemaException(
                         f'Attribute "{attribute_name}" in {kind} "{item_name}" has'
-                        f' refined type "{attribute_type}", however this is'
+                        f' refined type "{attribute_type_name}", however this is'
                         f" not a subtype of dictionary attribute type"
                         f' "{original_type}"'
                     )
 
-                if attribute.get("is_array") != dict_attribute.get("is_array"):
-                    raise SchemaException(
-                        f'Attribute "{attribute_name}" in {kind} "{item_name}" '
-                        f' "is_array" value {attribute.get("is_array")} does not'
-                        f" match dictionary attribute value of "
-                        f" {dict_attribute.get('is_array')}"
-                    )
-
-                # TODO: could also check other type constraints
-
                 # Checks are OK... we just need to fix up "type_name", which
                 # currently has the type from the dictionary type
-                new_attribute["type_name"] = dict_type["caption"]
+                new_attribute["type_name"] = dictionary_type["caption"]
                 logger.debug(
                     '_finish_item_attribute - attribute "%s" in %s "%s" is using'
                     ' refined type "%s"',
                     attribute_name,
                     kind,
                     item_name,
-                    attribute_type,
+                    attribute_type_name,
                 )
+
+        if "is_array" in attribute:
+            if attribute["is_array"] != dict_attribute.get("is_array"):
+                raise SchemaException(
+                    f'Attribute "{attribute_name}" in {kind} "{item_name}"'
+                    f' has "is_array" with value {attribute.get("is_array")} that does'
+                    f" not match dictionary attribute value of"
+                    f" {dict_attribute.get('is_array')}"
+                )
+
+        # TODO: could also check other type constraints
 
         return new_attribute
 
@@ -2587,7 +2614,8 @@ class SchemaCompiler:
         if "/" in ext_item_unscoped_name:
             raise SchemaException(
                 f'Illegal use of extension-scope in extension "{extension_name}"'
-                f' {kind} "{ext_item_unscoped_name}"'
+                f' {kind} "{ext_item_unscoped_name}"; shadowing or modifying a {kind}'
+                " from another extension is not allowed"
             )
 
         if ext_item_unscoped_name not in base_items:
@@ -2601,21 +2629,34 @@ class SchemaCompiler:
             )
         if self.allow_shadowing:
             self._warning(
-                'Extension "%s" %s "%s" shadows base %s',
+                'Extension "%s" %s "%s" shadows base schema %s with same name;'
+                " this name should be changed if this is a newly added %s",
                 extension_name,
                 kind,
                 ext_item_unscoped_name,
+                kind,
                 kind,
             )
         else:
             raise SchemaException(
                 f'Extension "{extension_name}" {kind} "{ext_item_unscoped_name}"'
-                f" shadows base {kind}."
-                " This should be fixed if this is a new extension."
-                " For an extension in active use, fixing can lead to backwards"
-                " incompatibility."
+                f" shadows base schema {kind} with same name."
+                f" For an extension that has never allowed shadowed names, including"
+                " new extensions, this name should be changed."
+                " If this is an existing name in an extension in active use, fixing can"
+                " lead to backwards incompatibility."
                 " Use the -a, --allow-shadowing option to enable shadowing."
             )
+
+    def _extension_uses_scoped_dictionary_types(self, extension: Extension) -> bool:
+        if extension.is_platform_extension:
+            return False
+        return not self.unscoped_dictionary_types
+
+    def _extension_id_uses_scoped_dictionary_types(self, extension_id: int) -> bool:
+        if extension_id in self._platform_extension_id_set:
+            return False
+        return not self.unscoped_dictionary_types
 
     def _get_dictionary_attribute(
         self, item: JObject, attribute_name: str, attribute: JObject
@@ -2627,8 +2668,6 @@ class SchemaCompiler:
         """
         dictionary_attributes = j_object(self._dictionary.get("attributes", {}))
         if "extension" in attribute:
-            # Special-case. This occurs with attributes from patched items that are
-            # defined in the extension that patched the item.
             ext_name = j_string(attribute["extension"])
             scoped_name = to_extension_scoped_name(ext_name, attribute_name)
             # No need to fall back in this case... the item should exist
@@ -2645,6 +2684,51 @@ class SchemaCompiler:
                 " is not a defined dictionary attribute"
             )
         return j_object(dictionary_attributes[attribute_name])
+
+    def _get_dictionary_type(
+        self, item: JObject, type_name: str, attribute: JObject
+    ) -> JObject:
+        """
+        Dictionary types are used without extension-scope in classes, objects,
+        and profiles. This returns the correct dictionary attribute whether or not it
+        is being used from an extension context.
+        """
+        dictionary_types = j_object(self._dictionary.get("types", {}))
+        dictionary_types_attributes = j_object(dictionary_types.get("attributes", {}))
+
+        if "extension" in attribute:
+            ext_name = j_string(attribute["extension"])
+            scoped_name = to_extension_scoped_name(ext_name, type_name)
+            if scoped_name in dictionary_types_attributes:
+                return j_object(dictionary_types_attributes[scoped_name])
+            # If not an extension dictionary type, it should be a base dictionary type
+
+        if type_name not in dictionary_types_attributes:
+            raise SchemaException(
+                f'Dictionary type "{type_name}" from "{full_name(item)}"'
+                " is not a defined dictionary type"
+            )
+        return j_object(dictionary_types_attributes[type_name])
+
+    def _get_possible_dictionary_type(
+        self, type_name: str, attribute: JObject
+    ) -> JObject | None:
+        """
+        Dictionary types are used without extension-scope in classes, objects,
+        and profiles. This returns the correct dictionary attribute whether or not it
+        is being used from an extension context, or None if it isn't a dictionary type.
+        """
+        dictionary_types = j_object(self._dictionary.get("types", {}))
+        dictionary_types_attributes = j_object(dictionary_types.get("attributes", {}))
+
+        if "extension" in attribute:
+            ext_name = j_string(attribute["extension"])
+            scoped_name = to_extension_scoped_name(ext_name, type_name)
+            if scoped_name in dictionary_types_attributes:
+                return j_object(dictionary_types_attributes.get(scoped_name))
+            # If not an extension dictionary type, it could be a base dictionary type
+
+        return j_object_optional(dictionary_types_attributes.get(type_name))
 
     def _create_compile_output(self) -> JObject:
         if self.legacy_mode:

@@ -1,0 +1,19 @@
+{
+  "caption": "Attribute Dictionary (Problem)",
+  "description": "The Problem Attribute Dictionary.",
+  "name": "dictionary",
+  "attributes": {
+  },
+  "types": {
+    "caption": "Data Types (Problem)",
+    "description": "The Problem extension data types.",
+    "attributes": {
+      "win/ip_t": {
+        "caption": "IP Address (Problem)",
+        "description": "Problem extension version of Internet Protocol address (IP address).",
+        "type": "string_t",
+        "type_name": "String"
+      }
+    }
+  }
+}

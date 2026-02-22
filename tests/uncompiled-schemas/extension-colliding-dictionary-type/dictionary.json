@@ -1,0 +1,19 @@
+{
+  "caption": "Attribute Dictionary (Problem)",
+  "description": "The Problem Attribute Dictionary.",
+  "name": "dictionary",
+  "attributes": {
+  },
+  "types": {
+    "caption": "Data Types (Problem)",
+    "description": "The Problem extension data types.",
+    "attributes": {
+      "ip_t": {
+        "caption": "IP Address (Problem)",
+        "description": "Problem extension version of Internet Protocol address (IP address) using bytestring_t.",
+        "type": "bytestring_t",
+        "type_name": "Byte String"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "caption": "Actor (Problem)",
+  "description": "Problem extension version of Actor object with illegal use of scoped linux/actor name.",
+  "extends": "object",
+  "name": "linux/actor",
+  "attributes": {
+    "user": {
+      "description": "The user that initiated the activity or the user context from which the activity was initiated.",
+      "requirement": "recommended"
+    }
+  }
+}

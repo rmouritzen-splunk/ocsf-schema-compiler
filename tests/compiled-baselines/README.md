@@ -22,7 +22,9 @@ ocsf-schema-compiler --browser-mode tests/uncompiled-schemas/ocsf-schema-v1.6.0 
 
 ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.0.0-rc.2 -i | zstd > tests/compiled-baselines/schema-v1.0.0-rc.2.json.zst
 
-ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/example-extensions | zstd > tests/compiled-baselines/schema-v1.6.0-example-v1.0.0.json.zst
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 -e tests/uncompiled-schemas/example-extensions | zstd > tests/compiled-baselines/schema-v1.6.0-example-extensions.json.zst
+
+ocsf-schema-compiler tests/uncompiled-schemas/ocsf-schema-v1.6.0 --allow-shadowing -e tests/uncompiled-schemas/example-extensions-shadow | zstd > tests/compiled-baselines/schema-v1.6.0-example-extensions-shadow.json.zst
 ```
 
 Schemas with filenames starting with `server-v3` were created via schema export of the v3 (older) Elixir OCSF Server using the `/export/schema` API.

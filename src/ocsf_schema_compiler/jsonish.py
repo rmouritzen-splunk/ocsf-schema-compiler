@@ -1,5 +1,10 @@
 from copy import deepcopy
 
+from ocsf_schema_compiler.exceptions import (
+    IncorrectTypeException,
+    KeyNotMappedException,
+)
+
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
 # As with all Python type hints, these improve code readability and help IDEs identify
@@ -128,6 +133,27 @@ def deep_merge(dest: JObject, source: JObject) -> None:
                 dest[source_key] = source_value
         else:
             dest[source_key] = source_value
+
+
+def get_in(o: JObject, *keys: str) -> JValue:
+    v: JValue = None
+    i = 0
+    key_count = len(keys)
+    for k in keys:
+        i += 1
+        if k in o:
+            v = o[k]
+        else:
+            raise KeyNotMappedException(f'Key "{".".join(keys[:i])}" is not mapped')
+        if i < key_count:
+            if isinstance(v, dict):
+                o = j_object(v)
+            else:
+                raise IncorrectTypeException(
+                    f'Expected value of key "{".".join(keys[:i])}" to be an object'
+                    f" but got {json_type_from_value(v)}"
+                )
+    return v
 
 
 def put_non_none(d: JObject, k: str, v: JValue) -> None:

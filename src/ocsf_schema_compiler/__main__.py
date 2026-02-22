@@ -43,11 +43,19 @@ def main():
         " extensions; can be repeated",
     )
     _ = parser.add_argument(
+        "-u",
+        "--unscoped-dictionary-types",
+        action="store_true",
+        default=False,
+        help="extension defined dictionary types will be un-scoped;"
+        " default: %(default)s",
+    )
+    _ = parser.add_argument(
         "-a",
         "--allow-shadowing",
         action="store_true",
         default=False,
-        help="allow names in extensions to shadow base extension names;"
+        help="allow names in extensions to shadow base schema names;"
         " default: %(default)s",
     )
     group = parser.add_mutually_exclusive_group()
@@ -95,6 +103,7 @@ def main():
         args.path,  # pyright: ignore[reportAny]
         args.ignore_platform_extensions,  # pyright: ignore[reportAny]
         args.extensions_paths,  # pyright: ignore[reportAny]
+        args.unscoped_dictionary_types,  # pyright: ignore[reportAny]
         args.allow_shadowing,  # pyright: ignore[reportAny]
         args.browser_mode,  # pyright: ignore[reportAny]
         args.legacy_mode,  # pyright: ignore[reportAny]

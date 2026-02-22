@@ -12,13 +12,16 @@ from diff import (  # pyright: ignore[reportImplicitRelativeImport]
     MISSING,
 )
 from ocsf_schema_compiler.compiler import SchemaCompiler
-from ocsf_schema_compiler.jsonish import JObject
+from ocsf_schema_compiler.exceptions import SchemaException
+from ocsf_schema_compiler.jsonish import JObject, get_in
 from ocsf_schema_compiler.structured_read import read_json_object_zstandard_file
 
 BASE_DIR = Path(__file__).parent
 
 
 class TestRegressions(unittest.TestCase):
+    """Test cases where compilation should succeed."""
+
     @classmethod
     @override
     def setUpClass(cls):
@@ -123,11 +126,6 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
-    # TODO: example extension
-    #       example-extensions should use new extension-scoping
-    #       another should use shadowed names
-    #       and another should use unscoped dictionary types (if scoped is supported)
-    @unittest.skip("TODO: fix example extension")
     def test_v1_6_0_with_example_extensions(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
@@ -135,8 +133,59 @@ class TestRegressions(unittest.TestCase):
             allow_shadowing=True,
         )
         schema = compiler.compile()
+
+        self.assertEqual(
+            "alpha/video_games",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "category",
+            ),
+            "Category should be extension-scoped",
+        )
+
+        self.assertEqual(
+            "system",
+            get_in(
+                schema,
+                "classes",
+                "alpha/system_comment",
+                "category",
+            ),
+            "Category should not be extension-scoped",
+        )
+
+        self.assertEqual(
+            "alpha/system_comment",
+            get_in(
+                schema,
+                "classes",
+                "alpha/system_comment_plus",
+                "extends",
+            ),
+            "Extends should be extension-scoped",
+        )
+
+        # The default compile uses extension-scoped dictionary type names
+        self.assertEqual(
+            "alpha/video_game_name_t",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "attributes",
+                "video_game_name",
+                "type",
+            ),
+            "Dictionary type should be extension-scoped",
+        )
+
         baseline_schema = read_json_object_zstandard_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-example-v1.0.0.json.zst")
+            Path(
+                BASE_DIR,
+                "compiled-baselines/schema-v1.6.0-example-extensions.json.zst",
+            )
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -146,6 +195,72 @@ class TestRegressions(unittest.TestCase):
         # To make sure diff_objects is implemented correctly, also check with Python
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
+    def test_v1_6_0_with_example_extensions_shadow(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+            allow_shadowing=True,
+        )
+        schema = compiler.compile()
+
+        self.assertEqual(
+            "alpha/video_games",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "category",
+            ),
+            "Category should be extension-scoped",
+        )
+
+        # The default compile uses extension-scoped dictionary type names
+        self.assertEqual(
+            "alpha/video_game_name_t",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "attributes",
+                "video_game_name",
+                "type",
+            ),
+            "Dictionary type should be extension-scoped",
+        )
+
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR,
+                "compiled-baselines/schema-v1.6.0-example-extensions-shadow.json.zst",
+            )
+        )
+
+        ok, diffs = diff_objects(schema, baseline_schema)
+        self.assertTrue(
+            ok,
+            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
+        )
+        # To make sure diff_objects is implemented correctly, also check with Python
+        # equality
+        self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
+    def test_v1_6_0_with_example_extensions_shadow_disabled(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+        )
+
+        # The example-extensions-shadowing rely on shadowing
+        with self.assertRaisesRegex(
+            SchemaException,
+            "shadows base schema",
+        ):
+            _ = compiler.compile()
 
     def test_legacy_v1_6_0_with_aws_v1_0_0(self):
         # The legacy schema export, even with v3 fixes, creates a slightly different

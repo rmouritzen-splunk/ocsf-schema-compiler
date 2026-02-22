@@ -1,9 +1,9 @@
 {
   "uid": 1,
-  "caption": "Home Automation Activity",
-  "category": "home_automation",
-  "description": "Home automation event added by beta example extension.",
-  "name": "home_automation_activity",
+  "caption": "Video Game Activity",
+  "category": "video_games",
+  "description": "Video game activity event added by alpha example extension.",
+  "name": "video_game_activity",
   "extends": "base_event",
   "attributes": {
     "access_mask": {
@@ -25,6 +25,13 @@
           "caption": "Uninstall"
         }
       }
+    },
+    "actor": {
+      "requirement": "required",
+      "profile": null
+    },
+    "video_game_name": {
+      "requirement": "required"
     }
   }
 }
