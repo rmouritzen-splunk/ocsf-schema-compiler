@@ -183,6 +183,11 @@ class SchemaCompiler:
         self._process_classes()
         self._process_objects()
 
+        self._validate_unique_ids(
+            j_object(self._categories.get("attributes", {})), "category"
+        )
+        self._validate_unique_ids(self._classes, "class")
+
         self._enrich_and_validate_dictionary()
         self._observables_from_dictionary()
 
@@ -329,12 +334,12 @@ class SchemaCompiler:
         self._resolve_extension_includes(extensions)
 
         for extension in extensions:
+            self._validate_extension_category_unique_ids(extension)
             # Add extension and extension_id values to most things in this extension
             extension.annotate()
 
-        # Before merging to base schema, we need to add scope (most) names used inside
-        # extension items.
-        # (The "name" property inside class, object, and profiles is not scoped.)
+        # Before merging to base schema, we need to add scope some of the names used
+        # inside extension items.
         self._extension_scope_class_categories(extensions)
         self._extension_scope_types(extensions)
         self._extension_scope_all_profiles_uses(extensions)
@@ -364,6 +369,8 @@ class SchemaCompiler:
             }
 
         self._platform_extension_id_set = frozenset(platform_ids)
+
+        self._validate_unique_ids(self._extensions, "extension")
 
     def _read_extensions(self) -> list[Extension]:
         extensions: list[Extension] = []
@@ -2601,6 +2608,65 @@ class SchemaCompiler:
                 # related enum attribute.
                 attribute["_sibling_of"] = sibling_of_dict[attribute_name]
 
+    def _validate_extension_category_unique_ids(self, extension: Extension) -> None:
+        base_cats = j_object(self._categories.get("attributes", {}))
+        base_uid_to_name: dict[int, str] = {}
+        for base_cat_name, base_cat in base_cats.items():
+            base_cat = j_object(base_cat)
+            base_uid_to_name[j_integer(base_cat["uid"])] = base_cat_name
+
+        ext_cats = j_object(extension.categories.get("attributes", {}))
+        for ext_cat_name, ext_cat in ext_cats.items():
+            ext_cat = j_object(ext_cat)
+            ext_cat_uid = j_integer(ext_cat["uid"])
+            if ext_cat_uid in base_uid_to_name:
+                base_cat_name = base_uid_to_name[ext_cat_uid]
+                self._warning(
+                    'Category unique ID collision: extension "%s" category "%s" with'
+                    ' "uid" %d collides with base category "%s" with "uid" %d.'
+                    '\n    The category "uid" values will not collide once the'
+                    ' extension category "uid" becomes extension-scoped, however this'
+                    ' can lead to class "uid" collisions in this extension.'
+                    '\n    If a class in extension "%s" uses base category "%s" and'
+                    ' another class in extension "%s" uses extension category "%s", the'
+                    ' resulting extension-scoped class "uid" values will be the same.'
+                    '\n    This is a known design flaw in the extension class "uid"'
+                    " calculation."
+                    '\n    If this is a newly defined category, its "uid" should be'
+                    ' changed. Since category "uid" values must be less than 100, we'
+                    "\n    suggest starting with 99 and working downwards."
+                    "\n    Otherwise, if a collision between extension-scoped class"
+                    ' "uid" occurs, one of them must be changed.',
+                    extension.name,
+                    ext_cat_name,
+                    ext_cat_uid,
+                    base_cat_name,
+                    ext_cat_uid,
+                    extension.name,
+                    base_cat_name,
+                    extension.name,
+                    ext_cat_name,
+                )
+
+    @staticmethod
+    def _validate_unique_ids(items: JObject, kind: str) -> None:
+        """
+        Validate that items do not have a unique ID collisions.
+        Note that for class "uid" values are scoped by category and (for extensions) by
+        category, so this check must be done _after_ they are processed.
+        """
+        names_by_uids: dict[int, str] = {}
+        for item_name, item in items.items():
+            item = j_object(item)
+            uid = j_integer(item["uid"])
+            if uid in names_by_uids:
+                other_item_name = names_by_uids[uid]
+                raise SchemaException(
+                    "Unique ID collision: "
+                    f'both {kind} "{item_name}" and "{other_item_name}" have "uid" {uid}'
+                )
+            names_by_uids[uid] = item_name
+
     def _check_shadowed_name(
         self,
         extension_name: str,
@@ -2845,6 +2911,7 @@ class Extension:
     def annotate(self) -> None:
         """
         Annotate all items in extension with extension information.
+        Change category attribute "uid" values to extension-scoped values.
         This must be done after processing includes.
         """
         category_attributes = j_object(self.categories.setdefault("attributes", {}))

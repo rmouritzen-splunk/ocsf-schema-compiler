@@ -1,0 +1,18 @@
+{
+  "uid": 2,
+  "caption": "System Comment Plus Event",
+  "category": "system",
+  "description": "A comment plus a message about the system added by alpha example extension.",
+  "name": "system_comment_plus",
+  "extends": "system_comment",
+  "attributes": {
+    "comment": {
+      "description": "Comment from System Comment Plus Event.",
+      "requirement": "required"
+    },
+    "message": {
+      "description": "A message about the system.",
+      "required": "required"
+    }
+  }
+}

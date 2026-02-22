@@ -4,17 +4,17 @@
   "name": "category",
   "attributes": {
     "video_games": {
-      "uid": 1,
+      "uid": 99,
       "caption": "Video Games",
       "description": "Video game events are a category from the alpha example extension."
     },
     "network": {
-      "uid": 2,
+      "uid": 98,
       "caption": "Network Activity (Alpha Example Extension)",
       "description": "Alpha example extension version of Network Activity events category."
     },
     "system": {
-      "uid": 3,
+      "uid": 97,
       "caption": "System Activity (Alpha Example Extension)",
       "description": "Alpha example extension version of System Activity events."
     }

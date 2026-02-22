@@ -1,0 +1,7 @@
+{
+  "uid": 100,
+  "caption": "Alpha Example Extension",
+  "description": "Alpha example extension exercising extension additions, changes, and edge cases.",
+  "name": "alpha",
+  "version": "1.0.0"
+}
