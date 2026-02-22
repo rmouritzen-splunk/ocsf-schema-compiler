@@ -1,8 +1,0 @@
-{
-  "uid": 101,
-  "TODO": "Enable this extension. Exercise errors - copy to error tests. Leave in edge cases.",
-  "caption": "Beta Example Extension",
-  "description": "Beta example extension exercising extension additions, changes, and edge cases.",
-  "name": "beta",
-  "version": "1.0.0"
-}

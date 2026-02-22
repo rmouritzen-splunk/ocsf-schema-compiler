@@ -852,7 +852,7 @@ class SchemaCompiler:
                 include_value = attribute.pop("$include")
                 if isinstance(include_value, str):
                     include_path = path_resolver(include_value)
-                    self._merge_attribute_detail_include(
+                    self._merge_attribute_properties_include(
                         item_attributes,
                         attribute_name,
                         attribute,
@@ -919,7 +919,7 @@ class SchemaCompiler:
         # replace item "attributes" with merged / resolved include attributes
         item["attributes"] = attributes
 
-    def _merge_attribute_detail_include(
+    def _merge_attribute_properties_include(
         self,
         attributes: JObject,
         attribute_name: str,
@@ -1698,12 +1698,6 @@ class SchemaCompiler:
                 dest_attribute[source_key] = source_value
             elif source_value == dest_attribute[source_key]:
                 pass  # No change - nothing to do
-            elif "extension" in source_attribute and "extension" in dest_attribute:
-                raise SchemaException(
-                    f'{context} attempted merge of "{source_key}" on top of attribute'
-                    f' from extension "{dest_attribute["extension"]}" - multiple'
-                    " extensions modifying the same attribute is not supported"
-                )
             elif source_key == "profiles":
                 # Special merge:
                 # set to None if source is None, otherwise merge set of both
@@ -1735,10 +1729,9 @@ class SchemaCompiler:
                     max(dest_rank, source_rank)
                 )
             else:
-                # hopefully a safe merge - deep merge if dicts, or overwrite
-                # TODO: This will add "extension" and "extension_id" because they exist
-                #       in source attribute. Consider tracking that this ends up in dest
-                #       because of a merge / overwrite?
+                # Hopefully a safe merge; deep merge if dicts, otherwise overwrite
+                # TODO: This will add "extension" and "extension_id" if they exist in
+                #       source attribute, possibly overwriting dest values.
                 if isinstance(dest_attribute[source_key], dict) and isinstance(
                     source_value, dict
                 ):

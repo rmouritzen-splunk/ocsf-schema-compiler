@@ -4,7 +4,7 @@
   "name": "category",
   "attributes": {
     "video_games": {
-      "uid": 1,
+      "uid": 99,
       "caption": "Video Games",
       "description": "Video game events are a category from the alpha example extension."
     }
