@@ -164,6 +164,8 @@ This is changed with ocsf-schema-compiler v0.9.8. Extensions can patch items pat
     - Objects
         - Object names are scoped in `objects`.
         - Object names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
+        - Object names are not scoped in an object's `name` or `extends` properties.
+            - Must add objects's `extension` to name to create extension-scoped name to lookup up in `objects`.
     - Profiles
         - Profile names are scoped in `profiles`.
         - Profile names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
