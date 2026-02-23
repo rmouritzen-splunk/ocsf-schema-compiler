@@ -3,6 +3,11 @@
   "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
   "name": "dictionary",
   "attributes": {
+    "debug_time": {
+      "caption": "Debug Time",
+      "description": "The time the debug occurred.",
+      "type": "timestamp_t"
+    },
     "video_game_name": {
       "caption": "Video Game Name",
       "description": "Video game name added by the alpha example extension.",

@@ -13,38 +13,142 @@ The ocsf-server's `/export/schema` format does not return all details, requiring
 The new format has the following:
 ```json5
 {
-    "categories": {},
-    "dictionary": {},
-    "classes": {},
-    "objects": {},
-    "classes": {},
-    "profiles": {},
-    "extensions": {},
+    "categories": {
+        "caption": "Categories",
+        "description": "...",
+        "name": "category",
+        "attributes": {
+            // Base schema categories
+            "<category_name>": {
+                "caption": "<short name>",
+                "description": "<description>",
+                "uid": 1
+            },
+            // Categories from extensions always use extension-scoped name
+            "<ext_name>/<category_name>": {
+                "caption": "<short name>",
+                "description": "<description>",
+                "extension": "<ext_name>",
+                "extension_id": 1, // extension uid
+                "uid": 199 // 100 * extension uid + category uid in extension
+            }
+        }
+    },
+    "dictionary": {
+        "caption": "Attribute Dictionary",
+        "description": "...",
+        "name": "dictionary",
+        "attributes": {
+            // Base schema dictionary attributes
+            "<attribute_name>": {
+                // attribute properties
+            },
+            // Dictionary attributes from extensions always use extension-scoped name
+            "<ext_name>/<attribute_name>": {
+                // attribute properties
+                "extension": "<ext_name>",
+                "extension_id": 1, // extension uid
+            }
+        },
+        "types": {
+            "caption": "Data Types",
+            "description": "...",
+            "attributes": {
+                // Base schema dictionary types
+                "<type_name>": {
+                    // type properties
+                },
+                // Platform extensions dictionary types
+                // and dictionary types from non-platform extensions
+                // if compiled with --unscoped-dictionary-types enabled (True)
+                "<attribute_name>": {
+                    // type properties
+                    "extension": "<ext_name>",
+                    "extension_id": 1, // extension uid
+                },
+                // Dictionary types from non-platform extensions
+                //      if compiled with --unscoped-dictionary-types enabled (True)
+                "<ext_name>/<attribute_name>": {
+                    // type properties
+                    "extension": "<ext_name>",
+                    "extension_id": 1, // extension uid
+                }
+            }
+        }
+    },
+    "classes": {
+        // class name is extension scoped when from an extension: "<ext_name>/<class_name>"
+        "<class_name>": {
+            "caption": "<short name>",
+            "category": "<category_name>",
+            "category_name": "<category_caption>",
+            "category_uid": 3,
+            "extension": "<extension_name>", // if class is from extension
+            "extension_id": 1, // if class is from extension
+            "description": "...",
+            "extends": "<base_class_name>", // if applicable
+            "name": "account_change", // name property is never extension-scoped
+            "profiles": [
+                "<profile_name>",
+                "<ext_name>/<profile_name>", // pextension-scoped when from extension
+            ],
+            // class uid = 1000 * category uid + class uid
+            // For extension the category-scoped is used, effectively
+            //      class uid = 1000 * ((100 * extension uid) + category uid) + class uid
+            // NOTE: The extension variation causes a potential class uid collision
+            //       with classes in the same extension using a mix of base and extension
+            //       categories with the same base category uid, while using the same class
+            //       uid (which are meant to be scoped by category). See below.
+            "uid": 3001,
+            // other class properties
+            "attributes": {
+                // attribute names are never extension-scoped
+                "<attribute_name>": {
+                    // attribute properties
+                }
+            }
+        }
+    },
+    "objects": {
+        // object name is extension scoped when from an extension: "<ext_name>/<object_name>"
+        "<object_name>": {
+            "caption": "<short name>",
+            "description": "...",
+            // other object properties
+            "attributes": {
+                // attribute names are never extension-scoped
+                "<attribute_name>": {
+                    // attribute properties
+                }
+            }
+        }
+    },
+    "profiles": {
+        // profile name is extension scoped when from an extension: "<ext_name>/<profile_name>"
+        "<profile_name>": {
+            // profiles properties - does not include attributes
+        }
+    },
+    "extensions": {
+        "<ext_name>": {
+            "caption": "<short name>",
+            "description": "...",
+            "name": "<ext_name>",
+            "platform_extension?": false, // or true
+            "uid": 100,
+            "version": "<major>.<minor>.<patch>"
+        }
+    },
     "version": "<major>.<minor>.<patch>",
     "compile_version": 1, // currently always 1
 }
 ```
 
-The dictionary format is following:
+For reference, the legacy `/export/schema` API returns the following top-level structure:
 ```json5
 {
-    "name": "dictionary",
-    "caption": "Attribute Dictionary",
-    "description": "<full description>",
-    "attributes": {}, // the attribute information
-    "types": {
-        "caption": "Data Types",
-        "description": "<full description>",
-        "attributes": {}, // the actual type information
-    }
-}
-```
-
-For reference, the legacy exported schema has the following top-level structure:
-```json5
-{
-  "base_event": {},
-  "classes": {},  // includes "base_event"
+  "base_event": {}, // note: this is broken in current version 3.1.0 (it is not fully processed)
+  "classes": {},  // includes "base_event" (this version of base_event is not broken in v3.1.0)
   "object": {},
   "dictionary_attributes": {}, // equivalent to the new schema at dictionary.attributes
   "types": {},  // dictionary types; equivalent to the new schema at dictionary.types.attributes
@@ -56,6 +160,31 @@ The main differences at this level are:
 - The addition of `compile_version` with value 1. The legacy schema has an implied version of 0.
 - The addition of `categories`, `profiles`, and `extensions` information. The legacy schema requires separate API calls to retrieve this information.
 - The dictionary is not split into `dictionary_attributes` and `types` but rather presented similar to the metaschema format.
+
+The `/api/categories`, `/api/extensions`, and `/api/profiles` APIs are needed to get the remaining details of the schema.
+
+## Potential extension class uid collision
+Class UIDs are meant to be scoped by category. All UIDs in an extension are meant to be scoped by the extension. However there is one situation where this breaks down due to the math used to create the extension-scoped UIDs.
+
+The colliding situation is the following:
+1. An extension has a category with a UID that is the same a base schema category. Normally extension categories using the same UID as a base category is fine.
+2. The extension has two classes, one of which uses the base schema category above and the other uses the extension category. Both of these classes use the same UID. Normally classes that use the same UID is fine so long as use different categories.
+
+The problem that formula creating an extension-scoped category UID overlaps with the formula for creating an extension-scoped class UID.
+
+These are the formulas.
+- Extension-scoped category UID: (100 * category UID)
+- Category-scoped class UID:
+    - For base schema classes:
+        - (1000 * category UID) + class UID
+    - For extension classes that use base schema categories:
+        - (1000 * ((100 * extension UID) + base category UID)) + class UID
+    - For extension classes that use extension categories:
+        - (1000 * ((100 * extension UID) + unscoped category UID)) + class UID
+
+The flaw is that for extension classes, both base category UIDs and extension category UIDs are both treated as if they come from the extension.
+
+The old compiler does not detect this situation and generates extension classes with the same UID values. The new compiler issues a warning when extension category UIDs match a base category UID, as well as an error for class UID collisions. Indeed, the new compiler checks for collisions with all UIDs: extension UIDs, categories (after extension-scoping), and class UIDs (after extension-scoping).
 
 ## Other differences
 This section cover a laundry list of other differences. Many of these are addressed in the ocsf-server [Bug fixes](https://github.com/ocsf/ocsf-server/pull/169) pull request, created as a way to more easily compare file differences during development of the new compiler.
@@ -88,17 +217,18 @@ In dictionary types that are subtypes, `type` refers to the base type's name (e.
 
 Class and object attributes are allowed to refine the type of their attributes to a subtype or the original. In these cases, legacy compiler was incorrectly populating the attribute details with the dictionary attribute's original base type and caption, rather than the refined type's base type and caption.
 
-### Difference 7: hanlding of extension-scoped names
+### Difference 7: handling of extension-scoped names
 ~~This is perhaps the biggest difference. The legacy compiler prefixed many names with the extension, a slash, and then the original name, for example `win/win_server`. This prefixing is annoying not consistent.~~
 
 ~~The new compiler uses extension-scoped names with profile names from extensions, as they appear in concrete events in the `metadata.profiles` field, and so dropping these prefixes would significant backwards incompatibility break.~~
 
-This has been largely changed. **TODO** Remove the strike-through paragraphs and this comment after beta period.
+This has been largely changed. As of v0.9.8, the new compiler now uses extension-scoped names the same way as the old compiler with two differences: extension defined dictionary types and other extension names that collide with base schema names.
 
-**TODO** Describe new handling. Shadowing. Dictionary types.
+First, dictionary types are handled different. The old compiler uses unscoped names for dictionary data types defined in extensions. This opens up the possibility new collisions should a future base schema version also add a dictionary data type with the same name. By default, the new compiler uses extension-scoped names for dictionary types defined in extensions other than platform extensions. The dictionary types added in platform extensions remain unscoped for backwards compatibility.
 
-**NOTE:** class, object, and profile `name` fields are not scoped. (This is unchanged from old compiler to new compiler.)
+This behavior can be changed with the `-u, --unscoped-dictionary-types` option. Developers of existing extensions that define dictionary types will want to use this option to avoid a breaking change when using the new compiler.
 
+Second, extension items with names that collide with base schema names cause an error by default, since this causes uses in the extension to _shadow_ the same item in the base schema, preventing the extension from using the base schema version of this item. (Remember that extensions refer to both base schema names and their own item names without a scope.) This behavior can be changed with the `-a, --allow-shadowing` option. When shadowed names are enabled, the new compiler will still issue a warning since additions to existing schema should still avoid these name collisions.
 
 ### Difference 8: class and object attribute profile change
 There are two differences here.
@@ -107,8 +237,27 @@ First, the legacy compiler format sometimes had class and object attribute detai
 
 Second, the new compiler uses `profiles` in class and object attributes. The allows multiple profiles to affect the same attribute. This amounts to design flaw in the legacy compiler output format since it was always possible to define multiple profiles that affect the same attribute.
 
+### Difference 9: extension are processed deterministically
+The new compiler processes extensions in a deterministic manner. This is useful in cases where extensions extend or patch items in other extensions.
+
+Processing order:
+1. Platform extensions — those in the base schema's `extensions` directory — are processed first, in ascending extension UID order.
+2. Other extensions are processed in ascending extension UID order.
+
+By contract, the old compiler processed extension in a partial order. Each paths in the `SCHEMA_EXTENSION` environment variable was considered in order, however the extensions inside each path were not processed in any sort order.
+
+### Difference 10: patched by tracking.
+The new compiler adds `patched_by_extensions` and `patched_by_extension_ids` properties to event classes and objects that are patched by extensions. These are lists of strings and integers, respectfully, since the same class or object can be patched multiple times.
+
+### Difference 11: undocumented dictionary attribute overwrite flag
+The new compiler removes support for the undocumented `overwrite` property of dictionary attributes.
+
+Note that the dictionary attribute `overwrite` property has never been supported by the metaschema. I suspect that the "overwrite" property has never been actively used.
+
+The old compiler allowed modification of dictionary attributes with this property. However, this creates the possibility of incompatible schemas.
+
 ## Errors detected by new compiler
-The new compiler is stricter than the legacy compiler.
+The new compiler is stricter than the legacy compiler. Below are the more notable errors.
 
 ### ~~Error: extensions modifications of dictionary types is not supported~~
 ~~Extensions are not allowed to modify any existing dictionary types. Modifications of dictionary types can easily lead to incompatibilities between events using this extension and events not using it, even for events that otherwise do not use extension additions or changes.~~
@@ -116,92 +265,16 @@ The new compiler is stricter than the legacy compiler.
 This is changed with ocsf-schema-compiler v0.9.8. See next section.
 
 ### Error: extension dictionary type name collision with base schema dictionary type
-
 Dictionary types defined in extensions other than platform extension are now extension-scoped by default. Dictionary types defined in platform extension remain unscoped for backwards compatibility. When the unscoped dictionary types option is enabled, name collisions with the base dictionary types is an error.
 
 If you are maintaining an extension, and this error occurs when compiling with a new version of the base schema, this means your extension is no longer compatible with the base schema from that version and forward. Your only options are to use a different dictionary type name in your extensions (a backwards incompatible change that _might_ be tolerable in your organization's specific usage), or create your own incompatible fork of the base schema. In other words, you're stuck and there is no good path forward.
 
-This is new behavior. The old compiler allowed modifying base schema dictionary types, silently allowing the possibility to create a schema incompatible with a schema compiled without your extension.
+This is new behavior with v0.9.8. The old compiler allowed modifying base schema dictionary types, silently allowing the possibility to create a schema incompatible with a schema compiled without your extension.
 
 ### ~~Error: extension patches can only patch the base schema~~
 ~~Extensions can only patches classes and objects in the base schema, including the platform extensions in the base schema.~~
 
 This is changed with ocsf-schema-compiler v0.9.8. Extensions can patch items patched by other extensions.
 
-## TODO issues and changes
-
-### This doc
-- Describe extension application order. Explain why this is done.
-    - Describe old compiler's partial ordering.
-- Describe addition of `patched_by_extensions` and `patched_by_extension_ids` attributes to patch items (classes and objects).
-- Extensions cannot modify categories in base schema or other extensions.
-    - This has always been true.
-- Extensions can add dictionary types, but cannot modify them.
-    - This is changed. Old compiler allowed extensions to modify dictionary types.
-    - This was always unsafe.
-- New compiler removes support for the undocumented "overwrite" property of dictionary attributes.
-    - The dictionary attribute "overwrite" property has never been supported by the metaschema.
-        - I suspect that the "overwrite" property has never been actively used.
-    - The old compiler allowed modification of dictionary attributes with this property.
-        - THis creates the possibility of incompatible schemas.
-- Extension things that are scoped in a compiled schema (note: these are consistent with the old compiler unless otherwise noted):
-    - Categories
-        - Category names in `categories.attributes` are scoped.
-        - (Note: the categories themselves do not have a `name` property, unlike classes, objects, and profiles.)
-    - Dictionary attributes
-        - Dictionary attribute names are scoped in `dictionary.attributes`.
-        - Dictionary attribute names are not scoped when used in classes, objects, profiles.
-            - Must add attribute's `extension` to name to create extension-scoped name to lookup up in `dictionary.attributes`.
-    - Dictionary types
-        - Scoping depends on new compiler options, allowing avoidance of name collisions.
-        - Options make it possible to create compiled output fully consistent with old compiler.
-        - Dictionary types in `dictionary.types.attributes`: **TODO**
-        - Dictionary types in classes, objects, profiles: **TODO**
-    - Classes
-        - Class names are scoped in `classes`.
-        - Class names are not scoped in a class's `name` or `extends` properties.
-            - Must add classes's `extension` to name to create extension-scoped name to lookup up in `classes`.
-    - Objects
-        - Object names are scoped in `objects`.
-        - Object names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
-        - Object names are not scoped in an object's `name` or `extends` properties.
-            - Must add objects's `extension` to name to create extension-scoped name to lookup up in `objects`.
-    - Profiles
-        - Profile names are scoped in `profiles`.
-        - Profile names are scoped in dictionary attribute `object_type` properties everywhere: in `dictionary.attributes` as well as `attributes` in classes, objects, and profiles.
-
-### Compiler issues and changes
-
-#### TODO items for this compiler.
-
-Legacy output should use one higher level of nesting. Top level should have categories, profiles, extensions, and export schema (what output now).
-
-- Define and describe exactly what is allowed during attribute merging.
-    - This occurs during patching as well as dictionary attribute to class, object, and profile attribute merging.
-    - `SchemaCompiler._merge_attribute_detail`
-        - Call tree:
-            - `SchemaCompiler._merge_attribute_detail`
-                - `SchemaCompiler._merge_attributes`
-                    - `SchemaCompiler._merge_attributes_include`
-                        - `SchemaCompiler._resolve_item_includes`
-                            - `SchemaCompiler._resolve_includes`
-                            - `SchemaCompiler._resolve_extension_includes`
-                    - `SchemaCompiler._resolve_patches`
-                    - `SchemaCompiler._resolve_item_extends`
-- Compare `SchemaCompiler._merge_attribute_detail_include` to `SchemaCompiler._merge_attribute_detail`.
-    - Note, and possibly raise error, for changes that can cause an incompatibility.
-    - Call tree:
-        - `SchemaCompiler._merge_attribute_detail_include`
-            - `SchemaCompiler._resolve_item_includes`
-                - `SchemaCompiler._resolve_includes`
-                - `SchemaCompiler._resolve_extension_includes`
-
-
-### Server issues
-**TODO** items for `ocsf-server`. These apply to v3 and v4 unless notes.
-- Support for profiles with same name from from different extensions.
-    - Profiles checkboxes need to support same profile name from different extensions. Also add extension prefix to name like "Linux/Linux Users".
-    - Profile page needs to show extension name.
-- v4 : change patch notation handling of `_patched_by_extensions` to `patched_by_extensions` / `patched_by_extension_ids`.
-    - These only occur in classes and objects.
-- v4 : add notation handling of `extension` and `patched_by_extensions` showing creator and modifier details.
+### Error: unique ID collision
+The new compiler checks for unique ID collisions in categories, classes, and extensions.

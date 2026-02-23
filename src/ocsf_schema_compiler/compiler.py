@@ -202,8 +202,6 @@ class SchemaCompiler:
         self._consolidate_class_profiles()
         self._verify_class_attributes_and_add_datetime()
 
-        # TODO: do we need self._verify_profile_attributes_and_add_datetime() ?
-
         self._ensure_attributes_have_requirement()
 
         self._finish_attributes()
@@ -2626,8 +2624,7 @@ class SchemaCompiler:
                     '\n    This is a known design flaw in the extension class "uid"'
                     " calculation."
                     '\n    If this is a newly defined category, its "uid" should be'
-                    ' changed. Since category "uid" values must be less than 100, we'
-                    "\n    suggest starting with 99 and working downwards."
+                    " changed."
                     "\n    Otherwise, if a collision between extension-scoped class"
                     ' "uid" occurs, one of them must be changed.',
                     extension.name,
@@ -2655,8 +2652,8 @@ class SchemaCompiler:
             if uid in names_by_uids:
                 other_item_name = names_by_uids[uid]
                 raise SchemaException(
-                    "Unique ID collision: "
-                    f'both {kind} "{item_name}" and "{other_item_name}" have "uid" {uid}'
+                    f'Unique ID collision: both {kind} "{item_name}"'
+                    f' and "{other_item_name}" have "uid" {uid}'
                 )
             names_by_uids[uid] = item_name
 

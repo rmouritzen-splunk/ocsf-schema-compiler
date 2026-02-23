@@ -6,6 +6,9 @@
   "attributes": {
     "debug": {
       "requirement": "recommended"
+    },
+    "debug_time": {
+      "requirement": "optional"
     }
   }
 }
