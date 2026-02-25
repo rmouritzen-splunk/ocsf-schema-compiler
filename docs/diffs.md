@@ -246,10 +246,7 @@ Processing order:
 
 By contract, the old compiler processed extension in a partial order. Each paths in the `SCHEMA_EXTENSION` environment variable was considered in order, however the extensions inside each path were not processed in any sort order.
 
-### Difference 10: patched by tracking.
-The new compiler adds `patched_by_extensions` and `patched_by_extension_ids` properties to event classes and objects that are patched by extensions. These are lists of strings and integers, respectfully, since the same class or object can be patched multiple times.
-
-### Difference 11: undocumented dictionary attribute overwrite flag
+### Difference 10: undocumented dictionary attribute overwrite flag
 The new compiler removes support for the undocumented `overwrite` property of dictionary attributes.
 
 Note that the dictionary attribute `overwrite` property has never been supported by the metaschema. I suspect that the "overwrite" property has never been actively used.

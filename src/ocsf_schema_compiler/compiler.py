@@ -1630,17 +1630,17 @@ class SchemaCompiler:
 
     def _patched_by_annotations(self, base: JObject, patch: JObject) -> None:
         """
-        Appends extension and extension_id from patch into patched_by_extensions and
-        patched_by_extension_ids lists in base.
+        Appends extension and extension_id from patch into _patched_by_extensions and
+        _patched_by_extension_ids lists in base.
         """
-        if self.legacy_mode:
-            # Legacy mode does not add this
+        if not self.browser_mode:
+            # Only added in browser-mode
             return
 
-        ext_names = j_array(base.setdefault("patched_by_extensions", []))
+        ext_names = j_array(base.setdefault("_patched_by_extensions", []))
         ext_names.append(j_string(patch["extension"]))
 
-        ext_ids = j_array(base.setdefault("patched_by_extension_ids", []))
+        ext_ids = j_array(base.setdefault("_patched_by_extension_ids", []))
         ext_ids.append(j_integer(patch["extension_id"]))
 
     def _merge_attributes(
