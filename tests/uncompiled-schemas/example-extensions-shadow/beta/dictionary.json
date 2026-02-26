@@ -9,6 +9,11 @@
       "type": "string_t",
       "is_array": true
     },
+    "rule": {
+      "caption": "Rule",
+      "description": "Alpha extension version of the rule attribute, shadowing the base schema's <code>rule</code> attribute.",
+      "type": "rule"
+    },
     "stacktrace": {
       "caption": "Stack Trace",
       "description": "Stack trace. Added by beta extensions.",

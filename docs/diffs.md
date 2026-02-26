@@ -253,6 +253,38 @@ Note that the dictionary attribute `overwrite` property has never been supported
 
 The old compiler allowed modification of dictionary attributes with this property. However, this creates the possibility of incompatible schemas.
 
+## Difference 11: extension names that shadow base schema names
+Extension names that that can shadow base schema names are an error by default.
+
+Shadowing can occur with the following kinds of extension defined items:
+- Category names
+- Class names
+- Object names
+- Dictionary attribute names
+- Dictionary type names
+    - This applies to non-platform (_private_) extension when the `-u`, `--unscoped-dictionary-types` option is _not_ enabled (the default). Dictionary type names that collide with the base schema are always an error for platform extensions, and are an error for non-platform (_private_) extensions when the `-u`, `--unscoped-dictionary-types` is enabled.
+- Profile names
+
+With the definition of an extension all names are unscoped. There is no way to distinguish between the base schema version of a name and an extension version of with the same name. When shadowing is enabled, the extension can _only_ use their version of the named item.
+
+This behavior can be changed with the `-a`, `--allow-shadowing` compiler option. This option is only recommended for existing extensions to maintain backwards compatibility. When enabled, shadowed names become a warning. These warnings should be examined since newly defined names should avoid colliding with base schema names to allow current or future uses of the base schema name.
+
+**TODO:** Should class names be checked for shadowing? These don't seem to be used anywhere. This check will be left for now pending feedback from the community.
+
+## Difference 12: extension profiles without extension-scope
+Most extension-defined items are referenced without an extension-scope, however when profile names are referenced in the extension class and object top-level `profiles` attribute, they are typically referenced _with_ an extension-scope.
+
+When an extension-define profile is referenced _without_ a scope, things get messy. The old compiler simply keeps the unscoped profile name, causing a mismatch between the profile's name in attributes that are enabled by the profile, and the name of the profile in the top-level class or object `profiles` property.
+
+When the new compiler encounters an unscoped profile name that is defined in the extension, it adds the extension-scope to the name. This fix-up avoids the name mismatch caused by the old compiler.
+
+### Include files and extension-scoped profiles
+Profile are also typically implemented using the magic `$include` attribute name in class and object definition with a value that is a relative path. For extensions, the include file handling always looks for this file _first_ relative to the extension's base directory (where the `extension.json` file is at), and next in the base schema directory. (Both the old and new compilers share this behavior.)
+
+The old compiler's extension-define profile name mismatch above is further compounded by always pulling in the extension-define include file. In other words, if an extension tried to define a shadowed, extension-specific version of a profile with the same name as a base class, but one in one case wanted an extension class or object to use the base schema profile, it wouldn't work. Although class or object would have the base schema's profile name in its top-level `profiles` attribute, the details included with the `$include` directive would pull in the extension-specific attributes.
+
+In short, the old compiler's approach is broken in this case. The new compiler tries to do something sensible, allowing unscoped extension-define profile name references to work like every other extension item name reference: unscoped.
+
 ## Errors detected by new compiler
 The new compiler is stricter than the legacy compiler. Below are the more notable errors.
 

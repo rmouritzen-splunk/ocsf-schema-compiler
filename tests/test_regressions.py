@@ -299,6 +299,24 @@ class TestRegressions(unittest.TestCase):
         ):
             _ = compiler.compile()
 
+    def test_v1_6_0_with_example_extensions_shadow_unscoped_dictionary_types(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+            allow_shadowing=True,
+            unscoped_dictionary_types=True,
+        )
+
+        # The dictionary type name collision should fail
+        with self.assertRaisesRegex(
+            SchemaException,
+            'Extension "alpha" dictionary type "ip_t" collides'
+            " with base schema dictionary type",
+        ):
+            _ = compiler.compile()
+
     def test_legacy_v1_6_0_with_aws_v1_0_0(self):
         # The legacy schema export, even with v3 fixes, creates a slightly different
         # schema, however these differences are not material differences in actual

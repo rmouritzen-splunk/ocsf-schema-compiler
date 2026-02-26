@@ -6,6 +6,10 @@
   "name": "video_game_activity",
   "extends": "base_event",
   "attributes": {
+    "$include": [
+      "profiles/host.json",
+      "profiles/trace.json"
+    ],
     "access_mask": {
       "group": "primary",
       "requirement": "recommended"
@@ -30,8 +34,16 @@
       "requirement": "required",
       "profile": null
     },
+    "rule": {
+      "description": "Video game rule used during this activity.",
+      "requirement": "optional"
+    },
     "video_game_name": {
       "requirement": "required"
     }
-  }
+  },
+  "profiles": [
+    "host",
+    "trace"
+  ]
 }
