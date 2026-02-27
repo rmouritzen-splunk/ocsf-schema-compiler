@@ -11,8 +11,13 @@
     },
     "ip": {
       "caption": "IP Address",
-      "description": "Alpha extension version of the IP Address attribute showing the base schema's <code>ip</code> attribute.",
+      "description": "Alpha extension version of the IP Address attribute shadowing the base schema's <code>ip</code> attribute.",
       "type": "ip_t"
+    },
+    "rule": {
+      "caption": "Rule",
+      "description": "Alpha extension version of rule attribute shadowing the base schema's <code>rule</code> attribute.",
+      "type": "rule"
     },
     "video_game_name": {
       "caption": "Video Game Name",

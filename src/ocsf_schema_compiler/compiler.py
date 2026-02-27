@@ -1872,6 +1872,7 @@ class SchemaCompiler:
     def _add_links_to_dictionary_attributes(self, item: JObject, link: JObject) -> None:
         if not self.browser_mode:
             return
+
         item_attributes = j_object(item.setdefault("attributes", {}))
         for item_attribute_name, item_attribute in item_attributes.items():
             dictionary_attribute = self._get_dictionary_attribute(
