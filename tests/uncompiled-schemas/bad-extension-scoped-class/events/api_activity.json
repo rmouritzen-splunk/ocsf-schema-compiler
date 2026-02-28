@@ -1,0 +1,17 @@
+{
+  "uid": 1,
+  "caption": "API Activity (Problem)",
+  "description": "Problem extension version of API Activity illegally using scoped name.",
+  "extends": "application",
+  "name": "linux/api_activity",
+  "attributes": {
+    "activity_id": {
+      "enum": {
+        "1": {
+          "caption": "Problem",
+          "description": "The API is a problem."
+        }
+      }
+    }
+  }
+}

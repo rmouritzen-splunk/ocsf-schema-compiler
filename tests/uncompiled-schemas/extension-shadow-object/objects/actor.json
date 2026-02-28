@@ -1,0 +1,12 @@
+{
+  "caption": "Actor (Problem)",
+  "description": "Problem extension version of Actor object with same actor name.",
+  "extends": "object",
+  "name": "actor",
+  "attributes": {
+    "user": {
+      "description": "The user that initiated the activity or the user context from which the activity was initiated.",
+      "requirement": "recommended"
+    }
+  }
+}

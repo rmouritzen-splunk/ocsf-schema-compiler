@@ -1,0 +1,19 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "debug": {
+      "caption": "Debug Information",
+      "description": "<b>Beta example extension update of <code>debug</code></b>. Debug information about non-fatal issues with this OCSF event. Each issue is a line in this string array.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "stacktrace": {
+      "caption": "Stack Trace",
+      "description": "Stack trace. Added by beta extensions.",
+      "type": "string_t",
+      "is_array": true
+    }
+  }
+}

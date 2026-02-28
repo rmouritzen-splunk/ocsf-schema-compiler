@@ -1,0 +1,18 @@
+{
+  "caption": "Trace",
+  "description": "The Alpha extension version of the Trace Profile shadowing the base schema's <code>trace</code> profile.",
+  "meta": "profile",
+  "name": "trace",
+  "annotations": {
+    "group": "primary"
+  },
+  "attributes": {
+    "ip": {
+      "requirement": "recommended"
+    },
+    "trace": {
+      "description": "The trace object from the Alpha extension's trace profile contains information about distributed traces which are critical to observability and describe how requests move through a system, capturing each step's timing and status.",
+      "requirement": "recommended"
+    }
+  }
+}

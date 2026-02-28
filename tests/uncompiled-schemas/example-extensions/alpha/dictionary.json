@@ -1,0 +1,29 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "debug_time": {
+      "caption": "Debug Time",
+      "description": "The time the debug occurred.",
+      "type": "timestamp_t"
+    },
+    "video_game_name": {
+      "caption": "Video Game Name",
+      "description": "Video game name added by the alpha example extension.",
+      "type": "video_game_name_t"
+    }
+  },
+  "types": {
+    "caption": "Data Types",
+    "description": "The data types available in OCSF. Each data type specifies constraints in the form regular expressions, max lengths or value limits. Implementers of OCSF should ensure they abide to these constraints.",
+    "attributes": {
+      "video_game_name_t": {
+        "caption": "Video Game Name Type",
+        "description": "Video game name type added by the alpha example extension.",
+        "type": "string_t",
+        "type_name": "String"
+      }
+    }
+  }
+}

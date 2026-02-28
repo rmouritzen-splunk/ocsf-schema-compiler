@@ -1,0 +1,13 @@
+{
+  "caption": "Finding Information with Debug",
+  "description": "Patch from alpha example extension. Patches base finding_info to add debug profile.",
+  "extends": "finding_info",
+  "attributes": {
+    "$include": [
+      "profiles/debug.json"
+    ]
+  },
+  "profiles": [
+    "alpha/debug"
+  ]
+}

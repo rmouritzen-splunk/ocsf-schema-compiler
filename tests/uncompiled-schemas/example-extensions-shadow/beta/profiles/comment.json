@@ -1,0 +1,11 @@
+{
+  "caption": "Comment",
+  "description": "Profile added by beta example extension. Adds comment attribute.",
+  "meta": "profile",
+  "name": "comment",
+  "attributes": {
+    "comment": {
+      "requirement": "optional"
+    }
+  }
+}

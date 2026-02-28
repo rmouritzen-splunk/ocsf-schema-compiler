@@ -1,0 +1,12 @@
+{
+  "caption": "Attribute Dictionary (Problem)",
+  "description": "The Problem Attribute Dictionary.",
+  "name": "dictionary",
+  "attributes": {
+    "linux/message": {
+      "caption": "Message (Problem)",
+      "description": "Illegal use of extension scope in attribute name.",
+      "type": "string_t"
+    }
+  }
+}

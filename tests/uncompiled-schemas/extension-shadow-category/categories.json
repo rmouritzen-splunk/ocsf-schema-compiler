@@ -1,0 +1,17 @@
+{
+  "caption": "Categories",
+  "description": "The OCSF categories for the Problem extension.",
+  "name": "category",
+  "attributes": {
+    "problem": {
+      "uid": 1,
+      "caption": "Problem",
+      "description": "Problem category. This will not collide with base."
+    },
+    "system": {
+      "uid": 2,
+      "caption": "System Activity (Problem)",
+      "description": "Problem extension version of System Activity category."
+    }
+  }
+}

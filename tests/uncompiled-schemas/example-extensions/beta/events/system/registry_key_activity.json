@@ -1,0 +1,12 @@
+{
+  "caption": "Patch of Registry Key Activity",
+  "description": "Beta example patch of Registry Key Activity.",
+  "extends": "win/registry_key_activity",
+  "attributes": {
+    "comment": {
+      "description": "Comment added to <code>registry_key_activity</code> by the beta example extension.",
+      "group": "primary",
+      "requirement": "recommended"
+    }
+  }
+}

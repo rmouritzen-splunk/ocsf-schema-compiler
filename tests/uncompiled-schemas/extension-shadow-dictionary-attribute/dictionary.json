@@ -1,0 +1,12 @@
+{
+  "caption": "Attribute Dictionary (Problem)",
+  "description": "The Problem Attribute Dictionary.",
+  "name": "dictionary",
+  "attributes": {
+    "message": {
+      "caption": "Message (Problem)",
+      "description": "The Problem extension version of message. Even has different type.",
+      "type": "integer_t"
+    }
+  }
+}

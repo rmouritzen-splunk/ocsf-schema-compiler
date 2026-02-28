@@ -1,0 +1,49 @@
+{
+  "uid": 1,
+  "caption": "Video Game Activity",
+  "category": "video_games",
+  "description": "Video game activity event added by alpha example extension.",
+  "name": "video_game_activity",
+  "extends": "base_event",
+  "attributes": {
+    "$include": [
+      "profiles/host.json",
+      "profiles/trace.json"
+    ],
+    "access_mask": {
+      "group": "primary",
+      "requirement": "recommended"
+    },
+    "activity_id": {
+      "enum": {
+        "1": {
+          "caption": "Install"
+        },
+        "2": {
+          "caption": "Update"
+        },
+        "3": {
+          "caption": "Run"
+        },
+        "4": {
+          "caption": "Uninstall"
+        }
+      }
+    },
+    "actor": {
+      "requirement": "required",
+      "profile": null
+    },
+    "rule": {
+      "description": "Video game rule used during this activity.",
+      "requirement": "optional"
+    },
+    "video_game_name": {
+      "requirement": "required"
+    }
+  },
+  "profiles": [
+    "host",
+    "trace"
+  ]
+}

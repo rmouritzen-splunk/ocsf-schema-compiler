@@ -12,13 +12,16 @@ from diff import (  # pyright: ignore[reportImplicitRelativeImport]
     MISSING,
 )
 from ocsf_schema_compiler.compiler import SchemaCompiler
-from ocsf_schema_compiler.jsonish import JObject
+from ocsf_schema_compiler.exceptions import SchemaException
+from ocsf_schema_compiler.jsonish import JObject, get_in
 from ocsf_schema_compiler.structured_read import read_json_object_zstandard_file
 
 BASE_DIR = Path(__file__).parent
 
 
 class TestRegressions(unittest.TestCase):
+    """Test cases where compilation should succeed."""
+
     @classmethod
     @override
     def setUpClass(cls):
@@ -68,10 +71,33 @@ class TestRegressions(unittest.TestCase):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
             Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-aws-v1.0.0.json.zst")
+        )
+        ok, diffs = diff_objects(schema, baseline_schema)
+        self.assertTrue(
+            ok,
+            f"schema (left) should match baseline (right):\n{formatted_diffs(diffs)}",
+        )
+        # To make sure diff_objects is implemented correctly, also check with Python
+        # equality
+        self.assertEqual(schema, baseline_schema, "schema should match baseline")
+
+    def test_v1_6_0_with_aws_v1_0_0_browser_mode(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
+            browser_mode=True,
+        )
+        schema = compiler.compile()
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR, "compiled-baselines/browser-schema-v1.6.0-aws-v1.0.0.json.zst"
+            )
         )
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
@@ -100,17 +126,102 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
-    def test_v1_0_0_rc_2_with_splunk_v1_16_2(self):
+    def test_v1_6_0_with_example_extensions(self):
         compiler = SchemaCompiler(
-            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.0.0-rc.2"),
-            ignore_platform_extensions=True,
-            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/splunk-v1.16.2")],
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extensions")],
+            allow_shadowing=True,
         )
         schema = compiler.compile()
+
+        self.assertEqual(
+            "alpha/video_games",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "category",
+            ),
+            "Extension class using extension category should be extension-scoped",
+        )
+
+        self.assertEqual(
+            "video_game_activity",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "name",
+            ),
+            "Extension class name should not be extension-scoped"
+            " (consistent with old compiler)",
+        )
+
+        self.assertEqual(
+            "system",
+            get_in(
+                schema,
+                "classes",
+                "alpha/system_comment",
+                "category",
+            ),
+            "Extension class using base category should not be extension-scoped",
+        )
+
+        self.assertEqual(
+            "system_comment",
+            get_in(
+                schema,
+                "classes",
+                "alpha/system_comment_plus",
+                "extends",
+            ),
+            "Extension class extends of extension class should not be extension-scoped"
+            " (consistent with old compiler)",
+        )
+
+        self.assertEqual(
+            "alpha",
+            get_in(
+                schema,
+                "objects",
+                "alpha/alpha",
+                "name",
+            ),
+            "Extension object name should not be extension-scoped"
+            " (consistent with old compiler)",
+        )
+
+        self.assertEqual(
+            "alpha",
+            get_in(
+                schema,
+                "objects",
+                "alpha/alpha_plus",
+                "extends",
+            ),
+            "Extension object extends of extension object should not be"
+            " extension-scoped (consistent with old compiler)",
+        )
+
+        # The default compile uses extension-scoped dictionary type names
+        self.assertEqual(
+            "alpha/video_game_name_t",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "attributes",
+                "video_game_name",
+                "type",
+            ),
+            "Dictionary type should be extension-scoped (new compiler default)",
+        )
+
         baseline_schema = read_json_object_zstandard_file(
             Path(
                 BASE_DIR,
-                "compiled-baselines/schema-v1.0.0-rc.2-splunk-v1.16.2.json.zst",
+                "compiled-baselines/schema-v1.6.0-example-extensions.json.zst",
             )
         )
         ok, diffs = diff_objects(schema, baseline_schema)
@@ -122,15 +233,48 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
-    def test_v1_6_0_with_example_extension(self):
+    def test_v1_6_0_with_example_extensions_shadow(self):
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
-            extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/example-extension")],
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+            allow_shadowing=True,
         )
         schema = compiler.compile()
-        baseline_schema = read_json_object_zstandard_file(
-            Path(BASE_DIR, "compiled-baselines/schema-v1.6.0-example-v1.0.0.json.zst")
+
+        self.assertEqual(
+            "alpha/video_games",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "category",
+            ),
+            "Category should be extension-scoped",
         )
+
+        # The default compile uses extension-scoped dictionary type names
+        self.assertEqual(
+            "alpha/video_game_name_t",
+            get_in(
+                schema,
+                "classes",
+                "alpha/video_game_activity",
+                "attributes",
+                "video_game_name",
+                "type",
+            ),
+            "Dictionary type should be extension-scoped",
+        )
+
+        baseline_schema = read_json_object_zstandard_file(
+            Path(
+                BASE_DIR,
+                "compiled-baselines/schema-v1.6.0-example-extensions-shadow.json.zst",
+            )
+        )
+
         ok, diffs = diff_objects(schema, baseline_schema)
         self.assertTrue(
             ok,
@@ -140,18 +284,51 @@ class TestRegressions(unittest.TestCase):
         # equality
         self.assertEqual(schema, baseline_schema, "schema should match baseline")
 
+    def test_v1_6_0_with_example_extensions_shadow_disabled(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+        )
+
+        # The example-extensions-shadowing rely on shadowing
+        with self.assertRaisesRegex(
+            SchemaException,
+            "shadows base schema",
+        ):
+            _ = compiler.compile()
+
+    def test_v1_6_0_with_example_extensions_shadow_unscoped_dictionary_types(self):
+        compiler = SchemaCompiler(
+            Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
+            extensions_paths=[
+                Path(BASE_DIR, "uncompiled-schemas/example-extensions-shadow")
+            ],
+            allow_shadowing=True,
+            unscoped_dictionary_types=True,
+        )
+
+        # The dictionary type name collision should fail
+        with self.assertRaisesRegex(
+            SchemaException,
+            'Extension "alpha" dictionary type "ip_t" collides'
+            " with base schema dictionary type",
+        ):
+            _ = compiler.compile()
+
     def test_legacy_v1_6_0_with_aws_v1_0_0(self):
         # The legacy schema export, even with v3 fixes, creates a slightly different
         # schema, however these differences are not material differences in actual
         # usage. The test uses a diff callback to ensure these differences are ones we
         # expect.
 
-        # Compile using legacy mode with scoped keys to minimize the differences.
+        # Compile using legacy mode to minimize the differences.
         compiler = SchemaCompiler(
             Path(BASE_DIR, "uncompiled-schemas/ocsf-schema-v1.6.0"),
             extensions_paths=[Path(BASE_DIR, "uncompiled-schemas/aws-v1.0.0")],
+            allow_shadowing=True,
             legacy_mode=True,
-            scope_extension_keys=True,
         )
         schema = compiler.compile()
         baseline_schema = read_json_object_zstandard_file(
@@ -180,25 +357,6 @@ def legacy_aws_diff_callback(
     left_diff: DiffValue,
     right_diff: DiffValue,
 ) -> bool:
-    # Legacy compiler adds _both_ aws/last_used_time and last_used_time
-    # This compiler overwrites last_used_time, and then the scope_extension_keys option
-    # adds it to aws/last_user_time
-    if (
-        key == "dictionary_attributes"
-        and isinstance(left_diff, DiffDictKeys)
-        and left_diff.keys == []
-        and isinstance(right_diff, DiffDictKeys)
-        and right_diff.keys == ["last_used_time", "last_used_time_dt"]
-    ):
-        return True
-
-    if (
-        path == ["dictionary_attributes", "last_used_time"]
-        or path == ["dictionary_attributes", "last_used_time_dt"]
-    ) and left_diff == MISSING:
-        # These will be missing with this compiler and scope_extension_keys (left value)
-        return True
-
     if (
         len(path) == 2
         and path[0] == "objects"
@@ -218,44 +376,6 @@ def legacy_aws_diff_callback(
         and right_diff is None
     ):
         # Same as above but now we are at the "objects.<object-name>.profiles" level
-        return True
-
-    if (
-        key in ["last_used_time", "last_used_time_dt"]
-        and len(path) > 2
-        and path[-2] == "attributes"
-        and isinstance(left_diff, DiffDictKeys)
-        and left_diff.keys == ["extension", "extension_id"]
-        and isinstance(right_diff, DiffDictKeys)
-        and right_diff.keys == []
-    ):
-        # This compiler overwrites the one last_user_time (which is carried over to
-        # last_user_time_dt) and so class and object attributes using it will have
-        # "extension" and "extension_id"
-        return True
-
-    if (
-        key in ["extension", "extension_id"]
-        and len(path) > 3
-        and path[-3] == "attributes"
-        and path[-2] in ["last_used_time", "last_used_time_dt"]
-        and left_diff != MISSING
-        and right_diff == MISSING
-    ):
-        # Same as above, though here we are at the attribute property level
-        return True
-
-    if (
-        key == "caption"
-        and len(path) > 3
-        and path[-3] == "attributes"
-        and path[-2] in ["last_used_time", "last_used_time_dt"]
-        and left_diff == "Last Used time"
-        and right_diff == "Last Used Time"
-    ):
-        # Because this compiler overwrite the actual dictionary attribute
-        # last_used_time, the caption in object attributes (and class attributes if
-        # that happened) becomes the one from the AWS extension.
         return True
 
     return False

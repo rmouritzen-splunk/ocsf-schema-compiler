@@ -1,0 +1,7 @@
+{
+  "uid": 100,
+  "caption": "Problem Extension",
+  "description": "Problem extension exercising an edge case.",
+  "name": "problem",
+  "version": "0.1.0"
+}

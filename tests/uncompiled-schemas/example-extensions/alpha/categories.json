@@ -1,0 +1,12 @@
+{
+  "caption": "Categories",
+  "description": "The OCSF categories for the Example extension.",
+  "name": "category",
+  "attributes": {
+    "video_games": {
+      "uid": 99,
+      "caption": "Video Games",
+      "description": "Video game events are a category from the alpha example extension."
+    }
+  }
+}

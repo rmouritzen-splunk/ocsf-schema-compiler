@@ -25,6 +25,10 @@ BASE_DIR = Path(__file__).parent
 # list of strings.
 @unittest.skip("skip example expected changes test")
 class TestExpectedChanges(unittest.TestCase):
+    """
+    Example test cases showing how to use diff_callback to handle expected changes.
+    """
+
     @classmethod
     @override
     def setUpClass(cls):

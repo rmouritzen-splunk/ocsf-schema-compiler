@@ -1,0 +1,17 @@
+{
+  "uid": 1,
+  "caption": "Alpha Activity",
+  "category": "system",
+  "description": "Alpha Activity events report when an alpha particle hits a system.",
+  "extends": "base_event",
+  "name": "alpha_activity",
+  "attributes": {
+    "activity_id": {
+      "enum": {
+        "1": {
+          "caption": "Hit"
+        }
+      }
+    }
+  }
+}

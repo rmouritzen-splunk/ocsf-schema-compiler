@@ -1,0 +1,14 @@
+{
+  "caption": "Debug",
+  "description": "Profile added by alpha example extension. Adds debug attribute.",
+  "meta": "profile",
+  "name": "debug",
+  "attributes": {
+    "debug": {
+      "requirement": "recommended"
+    },
+    "debug_time": {
+      "requirement": "optional"
+    }
+  }
+}

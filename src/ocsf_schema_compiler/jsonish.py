@@ -1,3 +1,10 @@
+from copy import deepcopy
+
+from ocsf_schema_compiler.exceptions import (
+    IncorrectTypeException,
+    KeyNotMappedException,
+)
+
 # Type aliases for JSON-compatible types. See https://json.org.
 # Yes, these are circular, and Python is OK with that.
 # As with all Python type hints, these improve code readability and help IDEs identify
@@ -8,7 +15,7 @@ type JValue = JObject | JArray | str | int | float | bool | None
 # JObject is a type alias for dictionary compatible with a JSON object.
 type JObject = dict[str, JValue]
 # JArray is a type alias for types compatible with a JSON array.
-type JArray = list[JValue]  # TODO | tuple[JValue]
+type JArray = list[JValue]  # if tuples are ever used, add | tuple[JValue]
 
 
 def json_type_from_value(value: object) -> str:
@@ -95,3 +102,60 @@ def j_integer(v: JValue) -> int:
         f"j_integer: expected integer number but got {json_type_from_value(v)}: {v}"
     )
     return v
+
+
+def deep_copy_j_object(obj: JObject) -> JObject:
+    """JObject typed flavor of copy.deepcopy. Returns deep copy of obj."""
+    return deepcopy(obj)
+
+
+def deep_copy_j_array(array: JArray) -> JArray:
+    """JArray typed flavor of copy.deepcopy. Returns deep copy of array."""
+    return deepcopy(array)
+
+
+def deep_merge(dest: JObject, source: JObject) -> None:
+    """
+    In-place merge a source dictionary into a destination dictionary, modifying the
+    destination dictionary.
+
+    Note: this merge does not merge lists or deep merge dictionaries inside lists. List
+    values are simply overwritten.
+    """
+
+    for source_key, source_value in source.items():
+        if source_key in dest:
+            dest_value = dest[source_key]
+            if isinstance(dest_value, dict) and isinstance(source_value, dict):
+                deep_merge(dest_value, source_value)
+            else:
+                # This replaces dest[source_key] with source_value
+                dest[source_key] = source_value
+        else:
+            dest[source_key] = source_value
+
+
+def get_in(o: JObject, *keys: str) -> JValue:
+    v: JValue = None
+    i = 0
+    key_count = len(keys)
+    for k in keys:
+        i += 1
+        if k in o:
+            v = o[k]
+        else:
+            raise KeyNotMappedException(f'Key "{".".join(keys[:i])}" is not mapped')
+        if i < key_count:
+            if isinstance(v, dict):
+                o = j_object(v)
+            else:
+                raise IncorrectTypeException(
+                    f'Expected value of key "{".".join(keys[:i])}" to be an object'
+                    f" but got {json_type_from_value(v)}"
+                )
+    return v
+
+
+def put_non_none(d: JObject, k: str, v: JValue) -> None:
+    if v is not None:
+        d[k] = v

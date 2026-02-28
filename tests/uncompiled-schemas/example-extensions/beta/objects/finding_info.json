@@ -1,0 +1,13 @@
+{
+  "caption": "Finding Information with Comment",
+  "description": "Patch from beta example extension. Patches base finding_info to add comment profile.",
+  "extends": "object",
+  "attributes": {
+    "$include": [
+      "profiles/comment.json"
+    ]
+  },
+  "profiles": [
+    "beta/comment"
+  ]
+}

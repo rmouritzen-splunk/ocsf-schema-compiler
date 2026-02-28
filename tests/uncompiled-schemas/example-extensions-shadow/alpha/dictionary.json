@@ -1,0 +1,46 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "debug": {
+      "caption": "Debug Information",
+      "description": "<b>Alpha example extension update of <code>debug</code></b>. Debug information about non-fatal issues with this OCSF event. Each issue is a line in this string array.",
+      "type": "string_t",
+      "is_array": true
+    },
+    "ip": {
+      "caption": "IP Address",
+      "description": "Alpha extension version of the IP Address attribute shadowing the base schema's <code>ip</code> attribute.",
+      "type": "ip_t"
+    },
+    "rule": {
+      "caption": "Rule",
+      "description": "Alpha extension version of rule attribute shadowing the base schema's <code>rule</code> attribute.",
+      "type": "rule"
+    },
+    "video_game_name": {
+      "caption": "Video Game Name",
+      "description": "Video game name added by the alpha example extension.",
+      "type": "video_game_name_t"
+    }
+  },
+  "types": {
+    "caption": "Data Types",
+    "description": "The data types available in OCSF. Each data type specifies constraints in the form regular expressions, max lengths or value limits. Implementers of OCSF should ensure they abide to these constraints.",
+    "attributes": {
+      "ip_t": {
+        "caption": "IP Address (Alpha extension)",
+        "description": "Alpha extension version of Internet Protocol address (IP address) shadowing base schema's <code>ip_t</code>.",
+        "type": "bytestring_t",
+        "type_name": "Byte String"
+      },
+      "video_game_name_t": {
+        "caption": "Video Game Name Type",
+        "description": "Video game name type added by the alpha example extension.",
+        "type": "string_t",
+        "type_name": "String"
+      }
+    }
+  }
+}

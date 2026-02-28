@@ -1,0 +1,13 @@
+{
+  "caption": "Attribute Dictionary",
+  "description": "The Attribute Dictionary defines schema attributes and includes references to the events and objects in which they are used.",
+  "name": "dictionary",
+  "attributes": {
+    "stacktrace": {
+      "caption": "Stack Trace",
+      "description": "Stack trace. Added by beta extensions.",
+      "type": "string_t",
+      "is_array": true
+    }
+  }
+}
