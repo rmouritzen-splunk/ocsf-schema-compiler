@@ -2,7 +2,7 @@ import json
 import logging
 from argparse import ArgumentParser
 from pathlib import Path
-from sys import stderr
+from sys import exit, stderr
 from time import perf_counter
 
 from ocsf_schema_compiler import __version__
@@ -97,23 +97,29 @@ def main():
         level=args.log_level,  # pyright: ignore[reportAny]
     )
 
-    start_seconds = perf_counter()
+    try:
+        start_seconds = perf_counter()
 
-    compiler = SchemaCompiler(
-        args.path,  # pyright: ignore[reportAny]
-        args.ignore_platform_extensions,  # pyright: ignore[reportAny]
-        args.extensions_paths,  # pyright: ignore[reportAny]
-        args.unscoped_dictionary_types,  # pyright: ignore[reportAny]
-        args.allow_shadowing,  # pyright: ignore[reportAny]
-        args.browser_mode,  # pyright: ignore[reportAny]
-        args.legacy_mode,  # pyright: ignore[reportAny]
-    )
-    output = compiler.compile()
+        compiler = SchemaCompiler(
+            args.path,  # pyright: ignore[reportAny]
+            args.ignore_platform_extensions,  # pyright: ignore[reportAny]
+            args.extensions_paths,  # pyright: ignore[reportAny]
+            args.unscoped_dictionary_types,  # pyright: ignore[reportAny]
+            args.allow_shadowing,  # pyright: ignore[reportAny]
+            args.browser_mode,  # pyright: ignore[reportAny]
+            args.legacy_mode,  # pyright: ignore[reportAny]
+        )
+        output = compiler.compile()
 
-    duration = perf_counter() - start_seconds
-    logger.info("Schema compilation took %.3f seconds", duration)
+        duration = perf_counter() - start_seconds
+        logger.info("Schema compilation took %.3f seconds", duration)
 
-    print(json.dumps(output))
+        print(json.dumps(output))
+
+    except Exception as e:
+        logger.exception("Compilation failed")
+        print(f"\nCompilation failed: {e}", file=stderr)
+        exit(1)
 
 
 if __name__ == "__main__":

@@ -29,14 +29,13 @@ def json_type_from_value(value: object) -> str:
         return "array"
     if isinstance(value, str):
         return "string"
+    # Test bool before int because it's a subtype of int
+    if isinstance(value, bool):
+        return "boolean"
     if isinstance(value, int):
         return "number (integer)"
     if isinstance(value, float):
         return "number (float)"
-    if isinstance(value, bool):
-        if value:
-            return "true"
-        return "false"
     if value is None:
         return "null"
     return f"non-JSON type: {type(value).__name__}"
@@ -98,7 +97,7 @@ def j_string_optional(v: JValue) -> str | None:
 
 def j_integer(v: JValue) -> int:
     """Ensures value v is an integer and returns it."""
-    assert isinstance(v, int), (
+    assert isinstance(v, int) and not isinstance(v, bool), (
         f"j_integer: expected integer number but got {json_type_from_value(v)}: {v}"
     )
     return v
