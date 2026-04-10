@@ -20,7 +20,10 @@ def _load_json_object_file(
     path: Path,
     f: Any,  # pyright: ignore[reportAny, reportExplicitAny]
 ) -> JObject:
-    v: Any = json.load(f)  # pyright: ignore[reportAny, reportExplicitAny]
+    try:
+        v: Any = json.load(f)  # pyright: ignore[reportAny, reportExplicitAny]
+    except json.JSONDecodeError as e:
+        raise SchemaException(f'Failed to decode schema file "{path}": {e}') from e
     if not isinstance(v, dict):
         t = json_type_from_value(v)  # pyright: ignore[reportAny]
         raise TypeError(
